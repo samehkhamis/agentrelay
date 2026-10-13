@@ -91,6 +91,11 @@ pub fn lang(path: &std::path::Path) -> String {
     path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
+/// Markdown files get a rendered preview beside their source.
+pub fn is_markdown(path: &std::path::Path) -> bool {
+    matches!(lang(path).to_ascii_lowercase().as_str(), "md" | "markdown" | "mdx")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{resolve, split_line};

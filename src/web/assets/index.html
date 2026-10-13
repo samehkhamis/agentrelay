@@ -63,6 +63,10 @@
     <div class="resizer" data-panel="viewer" title="Drag to resize · double-click to reset"></div>
     <header>
       <span id="viewer-path"></span>
+      <div id="viewer-mode" role="group" aria-label="View" hidden>
+        <button type="button" data-mode="preview">Preview</button>
+        <button type="button" data-mode="source">Source</button>
+      </div>
       <button id="viewer-copy" type="button" title="Copy the full path">Copy path</button>
       <button id="viewer-close" type="button" aria-label="Close">×</button>
     </header>

@@ -239,7 +239,8 @@ fn handle(mut req: Request, shared: &Shared) {
             respond_json(req, json!({ "html": full.map(|f| render::markdown(&f, &|_| false)) }))
         }
         (Method::Get, "/api/file") => {
-            // A file a feed mentions, highlighted for the file panel.
+            // A file a feed mentions, highlighted for the file panel, plus a
+            // rendered preview for markdown.
             let mut hub = shared.hub.lock().unwrap();
             let channel = arg("channel").unwrap_or_default();
             hub.follow(&channel);
@@ -254,6 +255,7 @@ fn handle(mut req: Request, shared: &Shared) {
                     "full": f.path,
                     "line": f.line,
                     "html": render::file(&files::lang(&f.path), &text, f.line),
+                    "preview": files::is_markdown(&f.path).then(|| render::preview(&text, &f.path)),
                 }),
                 Err(e) => json!({ "error": e.to_string() }),
             };

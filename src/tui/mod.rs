@@ -550,6 +550,13 @@ impl App {
             self.move_focus(k.code == KeyCode::Char('l'));
             return Ok(());
         }
+        // Alt+m flips a markdown file between its preview and source.
+        if k.modifiers.contains(KeyModifiers::ALT) && k.code == KeyCode::Char('m') {
+            if let Some(v) = self.viewer.as_mut() {
+                v.toggle();
+            }
+            return Ok(());
+        }
         if self.on_picker_key(k) || self.on_suggestion_key(k)? || self.on_pane_key(k) || self.on_cursor_key(k) {
             return Ok(());
         }
@@ -657,6 +664,7 @@ impl App {
             match kind {
                 MouseEventKind::ScrollUp => v.scroll = v.scroll.saturating_sub(3),
                 MouseEventKind::ScrollDown => v.scroll += 3,
+                MouseEventKind::Down(MouseButton::Left) if v.on_toggle(col, row) => v.toggle(),
                 _ => {}
             }
             return;

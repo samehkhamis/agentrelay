@@ -482,34 +482,55 @@ $("new-form").onsubmit = async (e) => {
 // ---------------------------------------------------------------- file panel
 
 let viewing = null; // full path of the open file
+let viewed = null; // its /api/file response
 
 async function openFile(raw) {
   const r = await api(`/api/file?${new URLSearchParams({ channel: current, file: raw })}`);
   if (r.error) return toast(r.error);
   viewing = r.full;
+  viewed = r;
   $("viewer-path").textContent = r.path;
   $("viewer-path").title = r.full;
-  $("viewer-body").innerHTML = r.html; // rendered and escaped by the server
+  $("viewer-mode").hidden = !r.preview;
   $("viewer").hidden = false;
   document.body.classList.add("viewing");
-  const target = r.line && $("viewer-body").querySelector(`#L${r.line}`);
+  // Markdown opens as a preview, unless the link points at a line.
+  showFile(r.preview && !r.line ? "preview" : "source");
+}
+
+// Shows the open file as highlighted source or, for markdown, rendered.
+function showFile(mode) {
+  const r = viewed;
+  const preview = mode === "preview" && r.preview;
+  // Both are rendered and escaped by the server.
+  $("viewer-body").innerHTML = preview ? `<div class="body preview">${r.preview}</div>` : r.html;
+  for (const b of $("viewer-mode").children) b.classList.toggle("on", b.dataset.mode === (preview ? "preview" : "source"));
+  const target = !preview && r.line && $("viewer-body").querySelector(`#L${r.line}`);
   if (target) target.scrollIntoView({ block: "center" });
   else $("viewer-body").scrollTop = 0;
 }
+$("viewer-mode").onclick = (e) => {
+  const mode = e.target.closest("button")?.dataset.mode;
+  if (mode && viewed) showFile(mode);
+};
 
 function closeFile() {
   viewing = null;
+  viewed = null;
   $("viewer").hidden = true;
   document.body.classList.remove("viewing");
 }
 
-$("feed").addEventListener("click", (e) => {
-  const link = e.target.closest("a.file");
-  if (link) {
-    e.preventDefault();
-    openFile(link.dataset.file);
-  }
-});
+// File links in the feed, and in a markdown preview (links to other files).
+for (const id of ["feed", "viewer-body"]) {
+  $(id).addEventListener("click", (e) => {
+    const link = e.target.closest("a.file");
+    if (link) {
+      e.preventDefault();
+      openFile(link.dataset.file);
+    }
+  });
+}
 $("viewer-close").onclick = closeFile;
 $("viewer-copy").onclick = async () => {
   await navigator.clipboard?.writeText(viewing ?? "");

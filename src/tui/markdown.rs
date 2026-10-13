@@ -172,6 +172,11 @@ impl Renderer {
             Tag::Strong => self.styles.push(Style::new().add_modifier(Modifier::BOLD)),
             Tag::Strikethrough => self.styles.push(Style::new().add_modifier(Modifier::CROSSED_OUT)),
             Tag::Link { .. } => self.styles.push(Style::new().fg(theme::t().link).add_modifier(Modifier::UNDERLINED)),
+            // An image shows as its alt text, marked.
+            Tag::Image { .. } => {
+                self.push("🖼 ", Style::new().fg(theme::t().link));
+                self.styles.push(Style::new().fg(theme::t().link).add_modifier(Modifier::ITALIC));
+            }
             Tag::Table(_) => {
                 self.flush();
                 self.gap();
@@ -212,7 +217,7 @@ impl Renderer {
                 self.flush();
                 self.lists.pop();
             }
-            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link => {
+            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link | TagEnd::Image => {
                 self.styles.pop();
             }
             TagEnd::TableHead => {

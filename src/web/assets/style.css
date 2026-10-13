@@ -421,6 +421,20 @@ body.viewing { grid-template-columns: var(--sidebar-w, 260px) minmax(0, 1fr) var
 #viewer-path { flex: 1; overflow: hidden; font: 600 14px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 #viewer header button { padding: 4px 10px; border: 1px solid var(--rule); border-radius: 6px; background: none; color: var(--fg); font: 13px var(--font); cursor: pointer; }
 #viewer-close { font-size: 18px !important; line-height: 1; }
+#viewer-mode { display: flex; }
+#viewer-mode[hidden] { display: none; }
+#viewer header #viewer-mode button { color: var(--dim); }
+#viewer header #viewer-mode button:first-child { border-radius: 6px 0 0 6px; }
+#viewer header #viewer-mode button:last-child { border-left: 0; border-radius: 0 6px 6px 0; }
+#viewer header #viewer-mode button.on { background: color-mix(in srgb, var(--link) 22%, transparent); color: var(--fg); }
+.body.preview { padding: 16px 20px 32px; font-size: 15px; line-height: 1.55; }
+.body.preview h1, .body.preview h2 { margin: 18px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--rule); text-decoration: none; }
+.body.preview h1 { font-size: 22px; }
+.body.preview h2 { font-size: 18px; }
+.body.preview h3 { margin: 14px 0 6px; font-size: 16px; }
+.body.preview p { margin: 0 0 10px; }
+.body.preview img { max-width: 100%; border-radius: 4px; vertical-align: middle; }
+.body.preview pre.code { margin: 8px 0 12px; }
 #viewer-body { flex: 1; overflow: auto; }
 #viewer-body .error { padding: 16px; color: var(--dim); }
 pre.file-view { margin: 0; padding: 8px 0; min-height: 100%; background: var(--code-bg); font: 12.5px/1.55 var(--mono); }
