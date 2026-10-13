@@ -94,12 +94,12 @@ tailscale serve --bg 3000
 The server accepts tailnet requests only from your own Tailscale login (checked
 against `tailscaled`), so other people on a shared tailnet can't use it.
 
-<table align="center">
-  <tr>
-    <td align="center"><img src="docs/screenshots/phone-dm.png" alt="A DM on a phone" width="220"><br><sub>A DM</sub></td>
-    <td align="center"><img src="docs/screenshots/phone-drawer.png" alt="The channel drawer on a phone" width="220"><br><sub>The channel drawer</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/phone-dm.png" alt="A DM on a phone" width="240">
+  <img src="docs/screenshots/phone-drawer.png" alt="The channel drawer on a phone" width="240">
+  <br>
+  <sub>A DM · The channel drawer</sub>
+</p>
 
 ### Terminal UI
 
@@ -143,25 +143,24 @@ These work in both UIs and autocomplete as you type.
 `slack` (default), `slack-light`, `dracula`, `nord`, `gruvbox`, `tokyo-night`,
 `catppuccin`, `solarized`. The syntax highlighting follows the theme.
 
-<table align="center">
-  <tr>
-    <td align="center"><img src="docs/screenshots/theme-light.png" alt="slack-light" width="400"><br><sub><code>slack-light</code></sub></td>
-    <td align="center"><img src="docs/screenshots/theme-dracula.png" alt="dracula" width="400"><br><sub><code>dracula</code></sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/theme-gruvbox.png" alt="gruvbox, with a file open" width="400"><br><sub><code>gruvbox</code>, with a file open</sub></td>
-    <td align="center"><img src="docs/screenshots/web-all.png" alt="slack, the #all channel" width="400"><br><sub><code>slack</code>, the #all channel</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/theme-light.png" alt="slack-light" width="420">
+  <img src="docs/screenshots/theme-dracula.png" alt="dracula" width="420">
+  <br>
+  <img src="docs/screenshots/theme-gruvbox.png" alt="gruvbox, with a file open" width="420">
+  <img src="docs/screenshots/web-all.png" alt="slack, the #all channel" width="420">
+  <br>
+  <sub><code>slack-light</code> · <code>dracula</code> · <code>gruvbox</code>, with a file open · <code>slack</code>, the #all channel</sub>
+</p>
 
 The file panel shows code at the mentioned line, and markdown rendered:
 
-<table align="center">
-  <tr>
-    <td align="center"><img src="docs/screenshots/web-file.png" alt="A file opened from a link, at the mentioned line" width="400"><br><sub>Code, at the mentioned line</sub></td>
-    <td align="center"><img src="docs/screenshots/web-preview.png" alt="A markdown file previewed in the file panel" width="400"><br><sub>Markdown, rendered</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/web-file.png" alt="A file opened from a link, at the mentioned line" width="420">
+  <img src="docs/screenshots/web-preview.png" alt="A markdown file previewed in the file panel" width="420">
+  <br>
+  <sub>Code, at the mentioned line · Markdown, rendered</sub>
+</p>
 
 ## How it works
 
@@ -212,18 +211,6 @@ treat it like a shell.
 | `AGENTRELAY_SOUND=off` | silence the chime |
 | `AGENTRELAY_IMAGES` | force `kitty`, `sixel`, `iterm2`, `halfblocks` or `off` in the TUI |
 | `AGENTRELAY_CODEX_HOURS` | how far back to list idle Codex threads (default 24) |
-| `AGENTRELAY_AGENTS` | read agents from a JSON file instead of discovering them |
-
-## Demo
-
-The screenshots use made-up agents from [`demo/`](demo). To try it without
-touching your real sessions:
-
-```sh
-HOME=$PWD/demo/home AGENTRELAY_AGENTS=$PWD/demo/agents.json \
-AGENTRELAY_DB=/tmp/agentrelay-demo/chat.db AGENTRELAY_USER=alex \
-  target/release/agentrelay serve --port 3901
-```
 
 ## Platforms
 

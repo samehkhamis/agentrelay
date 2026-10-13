@@ -69,30 +69,11 @@ pub struct Agent {
 }
 
 /// All live agents, plus recent Codex threads as away, sorted by group.
-/// `AGENTRELAY_AGENTS=<file.json>` reads a fixed list instead (relative
-/// transcript paths resolve against the file, `~` in folders against $HOME),
-/// for demos and testing.
 pub fn discover() -> Vec<Agent> {
-    if let Ok(file) = std::env::var("AGENTRELAY_AGENTS") {
-        return from_file(Path::new(&file));
-    }
     let mut agents = claude::list();
     agents.extend(codex::list());
     agents.sort_by(|a, b| a.group.cmp(&b.group).then(a.name.cmp(&b.name)));
     agents.dedup_by(|a, b| a.name == b.name);
-    agents
-}
-
-fn from_file(file: &Path) -> Vec<Agent> {
-    let text = std::fs::read_to_string(file).unwrap_or_default();
-    let mut agents: Vec<Agent> = serde_json::from_str(&text).unwrap_or_default();
-    let dir = file.parent().unwrap_or(Path::new("."));
-    for a in &mut agents {
-        if let Some(t) = a.transcript.as_mut().filter(|t| t.is_relative()) {
-            *t = dir.join(&*t);
-        }
-        a.cwd = crate::db::expand_tilde(&a.cwd).display().to_string();
-    }
     agents
 }
 

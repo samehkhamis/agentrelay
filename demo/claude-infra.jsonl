@@ -1,5 +1,0 @@
-{"type": "user", "message": {"role": "user", "content": "Plan the staging cluster upgrade to the new node pool."}, "uuid": "demo-31", "timestamp": "2026-10-12T22:20:00Z"}
-{"type": "ai-title", "aiTitle": "Staging node pool upgrade"}
-{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "i1", "name": "Bash", "input": {"command": "terraform -chdir=envs/staging plan -out=upgrade.plan"}}]}, "uuid": "demo-32", "timestamp": "2026-10-12T22:21:00Z"}
-{"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "i1", "content": "Plan: 3 to add, 0 to change, 3 to destroy."}]}, "uuid": "demo-33", "timestamp": "2026-10-12T22:22:00Z"}
-{"type": "assistant", "isSidechain": false, "message": {"role": "assistant", "content": [{"type": "text", "text": "The plan replaces the 3 staging nodes with the `general-v2` pool (`~/code/infra/envs/staging/main.tf`): **3 to add, 3 to destroy**, nothing else changes. Pods move over as the old nodes drain, so staging stays up. Say the word and I'll apply it."}]}, "uuid": "demo-34", "timestamp": "2026-10-12T22:23:00Z"}

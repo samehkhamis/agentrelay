@@ -1,2 +1,0 @@
-{"timestamp": "2026-10-12T22:31:00Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Update the getting started guide for the new CLI flags."}]}}
-{"timestamp": "2026-10-12T22:33:00Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "`~/code/docs/getting-started.md` now covers `--profile` and `--dry-run`, and the install section uses the new one-line installer."}]}}
