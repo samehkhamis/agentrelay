@@ -226,6 +226,20 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
 .tool.expandable { cursor: pointer; }
 .tool.expandable:hover .tool-detail { color: var(--fg); }
 .tool-full { margin: 2px 0 6px 18px; }
+.changes { margin: 6px 0 4px; border: 1px solid var(--rule); border-left: 3px solid var(--link); border-radius: 6px; overflow: hidden; }
+.changes-head { padding: 5px 10px; font-weight: 700; font-size: 13px; background: var(--hover); border-bottom: 1px solid var(--rule); }
+.changes-head .count { margin-left: 4px; color: var(--dim); font-weight: 400; }
+.change > summary { display: flex; align-items: baseline; gap: 8px; padding: 3px 10px; font: 12.5px/1.6 var(--mono); cursor: pointer; list-style: none; }
+.change > summary::-webkit-details-marker { display: none; }
+.change > summary::before { content: "▸"; color: var(--dim); }
+.change[open] > summary::before { content: "▾"; }
+.change > summary:hover { background: var(--hover); }
+.change .add { min-width: 4ch; color: var(--online); }
+.change .del { min-width: 4ch; color: var(--error); }
+.change .file { color: var(--link); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.change .gone { color: var(--dim); text-decoration: line-through; }
+.change .op { color: var(--dim); }
+.change pre.code { margin: 0 10px 8px 26px; }
 
 #jump {
   position: absolute;

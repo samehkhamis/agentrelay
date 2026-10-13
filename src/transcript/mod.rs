@@ -23,6 +23,26 @@ pub enum Item {
     /// A tool call: a one-line `detail`, the `full` input as markdown, the
     /// file it works on (if any), and images it returned (e.g. screenshots).
     Tool { name: String, detail: String, full: String, path: Option<String>, error: bool, files: Vec<String> },
+    /// A file an edit changed. Feeds show a turn's changes together.
+    Change(Change),
+}
+
+/// One edit to a file, as the agent's own edit tool recorded it.
+pub struct Change {
+    /// Absolute path.
+    pub path: String,
+    pub op: ChangeOp,
+    /// Unified diff hunks (`@@ … @@` and `+`/`-`/` ` lines).
+    pub diff: String,
+    pub added: usize,
+    pub removed: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChangeOp {
+    Added,
+    Updated,
+    Deleted,
 }
 
 pub struct Entry {
@@ -296,6 +316,14 @@ fn prompt(key: String, ts: i64, from: Option<String>, text: &str, mut files: Vec
         None => (from, text),
     };
     Event::Entry(Entry { key, ts, item: Item::Prompt { from, text: text.to_string(), files } }, None)
+}
+
+/// A file change entry; counts come from the diff's `+`/`-` lines.
+fn change(key: String, ts: i64, path: &str, op: ChangeOp, diff: String) -> Event {
+    let count = |mark: char| diff.lines().filter(|l| l.starts_with(mark) && !l.starts_with("+++") && !l.starts_with("---")).count();
+    let (added, removed) = (count('+'), count('-'));
+    let item = Item::Change(Change { path: path.to_string(), op, diff, added, removed });
+    Event::Entry(Entry { key, ts, item }, None)
 }
 
 /// What a tool call contributes before its result arrives.

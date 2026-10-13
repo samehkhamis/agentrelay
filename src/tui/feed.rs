@@ -79,6 +79,14 @@ pub fn layout(
             let file = path.filter(|f| files::resolve(p.cwd.unwrap_or(""), f).is_some()).map(str::to_string);
             tools.push((lines.len(), ToolRow { key: p.key.clone(), file, expandable: !full.is_empty() }));
         }
+        if let Body::Changes(changed) = &p.body {
+            let first = lines.len();
+            let (rows, region) = changes(changed, p, open, body_width, cache);
+            tools.extend(rows.into_iter().map(|(at, row)| (first + at, row)));
+            lines.extend(region.into_iter().map(|l| gutter(p, l)));
+            items.push((item_start..lines.len(), p.key.clone()));
+            continue;
+        }
         let is_file = |c: &str| files::resolve(p.cwd.unwrap_or(""), c).is_some();
         let body = cache.get(&p.key, body_width, || render_body(&p.body, body_width, &is_file));
         let first = lines.len();
@@ -105,6 +113,66 @@ pub fn layout(
         items.push((item_start..lines.len(), p.key.clone()));
     }
     Layout { lines, slots, tools, items }
+}
+
+/// Most diff lines shown per file; the file itself is a click away.
+const DIFF_LINES: usize = 400;
+
+/// A turn's changed files as a marked region: a header that shows or hides
+/// the diffs, and a row per file that opens it. Returns the click targets
+/// (by line within the region) and the region's lines.
+fn changes(changed: &[feed::Changed], p: &Post, open: bool, width: usize, cache: &mut Cache) -> (Vec<(usize, ToolRow)>, Vec<Line<'static>>) {
+    use crate::transcript::ChangeOp;
+    let th = theme::t();
+    let bar = || Span::styled("┃ ", Style::new().fg(th.link));
+    let dim = Style::new().fg(th.dim);
+    let mut lines = vec![Line::from(vec![
+        bar(),
+        Span::styled("Files changed", Style::new().fg(th.fg).bold()),
+        Span::styled(format!("  {}  {}", changed.len(), if open { "▾ diffs" } else { "▸ diffs" }), dim),
+    ])];
+    let mut rows = Vec::new();
+    let edits: usize = changed.iter().map(|f| f.diffs.len()).sum();
+    for (i, f) in changed.iter().enumerate() {
+        let gone = f.op == ChangeOp::Deleted;
+        let name = Style::new().fg(if gone { th.dim } else { th.link });
+        let note = match f.op {
+            ChangeOp::Added => "  new",
+            ChangeOp::Deleted => "  deleted",
+            ChangeOp::Updated => "",
+        };
+        let file = (!gone).then(|| f.path.to_string());
+        rows.push((lines.len(), ToolRow { key: p.key.clone(), file, expandable: false }));
+        lines.push(Line::from(vec![
+            bar(),
+            Span::styled(format!("+{:<5}", f.added), Style::new().fg(th.online)),
+            Span::styled(format!("−{:<5}", f.removed), Style::new().fg(th.error)),
+            Span::styled(crate::files::display_path(f.path, p.cwd), if gone { name } else { name.add_modifier(Modifier::UNDERLINED) }),
+            Span::styled(note, dim),
+        ]));
+        if open {
+            let key = format!("{}:{i}:{edits}", p.key);
+            let diff = cache.get(&key, width, || {
+                let text: Vec<&str> = f.diffs.iter().flat_map(|d| d.lines()).collect();
+                let mut out: Vec<Line<'static>> = crate::highlight::lines("diff", &text[..text.len().min(DIFF_LINES)].join("\n"))
+                    .into_iter()
+                    .map(|tokens| Line::from(tokens.into_iter().map(|((r, g, b), t)| Span::styled(t, Style::new().fg(ratatui::style::Color::Rgb(r, g, b)))).collect::<Vec<_>>()))
+                    .collect();
+                if text.len() > DIFF_LINES {
+                    out.push(Line::styled(format!("… {} more lines", text.len() - DIFF_LINES), Style::new().fg(theme::t().dim)));
+                }
+                out
+            });
+            lines.extend(diff.iter().map(|l| {
+                let mut l = l.clone();
+                l.spans.splice(0..0, [bar(), Span::raw("  ")]);
+                l
+            }));
+        }
+    }
+    // The header last, so keyboard actions on the post toggle the diffs.
+    rows.push((0, ToolRow { key: p.key.clone(), file: None, expandable: true }));
+    (rows, lines)
 }
 
 fn indent(mut l: Line<'static>) -> Line<'static> {
@@ -157,6 +225,7 @@ fn render_body(body: &Body, width: usize, is_file: &dyn Fn(&str) -> bool) -> Vec
             }
             lines
         }
+        Body::Changes(_) => Vec::new(), // laid out by `changes`
         Body::Tool { name, detail, full, path, error } => {
             // ▸ collapsed, ▾ expanded (drawn by layout), ✗ failed; · nothing to expand.
             let mark = match (*error, full.is_empty()) {

@@ -420,6 +420,13 @@ fn feed(shared: &Shared, channel: &str, v: Option<&str>) -> Value {
                     let tool = json!({ "name": name, "detail": detail, "error": error, "expandable": !full.is_empty(), "file": file });
                     (None, tool, Value::Null)
                 }
+                Body::Changes(changed) => {
+                    // The post grows during a turn, so the edit count is part of the key.
+                    let edits: usize = changed.iter().map(|f| f.diffs.len()).sum();
+                    let key = format!("{}:{}:{edits}", theme::t().name, p.key);
+                    let html = cache.entry(key).or_insert_with(|| render::changes(changed, p.cwd, &p.key)).clone();
+                    (Some(html), Value::Null, Value::Null)
+                }
             };
             json!({
                 "key": p.key,

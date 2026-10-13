@@ -37,6 +37,7 @@ fn mentions(p: &Post) -> Vec<(String, FileRef)> {
     let cwd = p.cwd.unwrap_or("");
     let raws: Vec<String> = match &p.body {
         feed::Body::Tool { path: Some(path), .. } => vec![path.to_string()],
+        feed::Body::Changes(files) => files.iter().map(|f| f.path.to_string()).collect(),
         feed::Body::Markdown { text, .. } => crate::highlight::markdown(text)
             .filter_map(|e| match e {
                 pulldown_cmark::Event::Code(c) => Some(c.to_string()),
@@ -285,6 +286,7 @@ impl Hub {
             feed::Body::Markdown { text, .. } => text.to_string(),
             feed::Body::Tool { full: "", detail, .. } => detail.to_string(),
             feed::Body::Tool { full, .. } => unfence(full),
+            feed::Body::Changes(files) => files.iter().map(|f| f.path).collect::<Vec<_>>().join("\n"),
         };
         Some((mentions(p), text))
     }

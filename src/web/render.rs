@@ -3,6 +3,8 @@
 //! and only http(s)/mailto links survive, since the page can send prompts.
 
 use crate::highlight;
+use crate::hub::feed::Changed;
+use crate::transcript::ChangeOp;
 use pulldown_cmark::{html, CowStr, Event, Tag, TagEnd};
 use std::path::Path;
 
@@ -111,6 +113,45 @@ fn inline_image(dir: &Path, url: &str) -> Option<String> {
     }
     let data = base64::engine::general_purpose::STANDARD.encode(std::fs::read(&path).ok()?);
     Some(format!("data:{mime};base64,{data}"))
+}
+
+/// Most diff lines shown per file; the file itself is a click away.
+const DIFF_LINES: usize = 400;
+
+/// A turn's changed files: a marked region with a row per file, each opening
+/// the file in the panel and expanding to its diff.
+pub fn changes(files: &[Changed], cwd: Option<&str>, key: &str) -> String {
+    let mut out = format!(
+        "<div class=\"changes\"><div class=\"changes-head\">Files changed <span class=\"count\">{}</span></div>",
+        files.len()
+    );
+    for (i, f) in files.iter().enumerate() {
+        let shown = escape(&crate::files::display_path(f.path, cwd));
+        // A deleted file has nothing to open.
+        let name = match f.op {
+            ChangeOp::Deleted => format!("<span class=\"gone\">{shown}</span>"),
+            _ => format!("<a class=\"file\" data-file=\"{}\">{shown}</a>", escape(f.path)),
+        };
+        let op = match f.op {
+            ChangeOp::Added => "<span class=\"op\">new</span>",
+            ChangeOp::Deleted => "<span class=\"op\">deleted</span>",
+            ChangeOp::Updated => "",
+        };
+        let diff: Vec<&str> = f.diffs.iter().flat_map(|d| d.lines()).collect();
+        let mut text = diff.iter().take(DIFF_LINES).copied().collect::<Vec<_>>().join("\n");
+        if diff.len() > DIFF_LINES {
+            text.push_str(&format!("\n… {} more lines", diff.len() - DIFF_LINES));
+        }
+        out.push_str(&format!(
+            "<details class=\"change\" data-key=\"{}:{i}\"><summary><span class=\"add\">+{}</span><span class=\"del\">−{}</span>{name}{op}</summary>{}</details>",
+            escape(key),
+            f.added,
+            f.removed,
+            code_block("diff", &text)
+        ));
+    }
+    out.push_str("</div>");
+    out
 }
 
 fn code_block(lang: &str, code: &str) -> String {

@@ -4,7 +4,7 @@
 use super::channels::{self, Channel};
 use crate::agents::Kind;
 use crate::db::Msg;
-use crate::transcript::{Entry, Item, Tail};
+use crate::transcript::{Change, ChangeOp, Entry, Item, Tail};
 use chrono::{Local, TimeZone};
 
 const STATUS_NOTE: &str = "↻ latest reply";
@@ -39,6 +39,41 @@ pub enum Body<'a> {
     /// A tool call: one line, expandable to its `full` input (markdown), and
     /// the file it worked on.
     Tool { name: &'a str, detail: &'a str, full: &'a str, path: Option<&'a str>, error: bool },
+    /// The files a turn changed, at its end.
+    Changes(Vec<Changed<'a>>),
+}
+
+/// A file changed during a turn: its edits merged.
+pub struct Changed<'a> {
+    pub path: &'a str,
+    pub op: ChangeOp,
+    pub added: usize,
+    pub removed: usize,
+    /// Each edit's diff, in order.
+    pub diffs: Vec<&'a str>,
+}
+
+impl<'a> Changed<'a> {
+    /// A turn's changes, one per file in the order first touched.
+    fn merge(changes: &[(i64, &'a Change)]) -> Vec<Changed<'a>> {
+        let mut out: Vec<Changed> = Vec::new();
+        for (_, c) in changes {
+            let i = match out.iter().position(|o| o.path == c.path) {
+                Some(i) => i,
+                None => {
+                    out.push(Changed { path: &c.path, op: c.op, added: 0, removed: 0, diffs: Vec::new() });
+                    out.len() - 1
+                }
+            };
+            let f = &mut out[i];
+            // Created this turn stays "added"; otherwise the last edit says.
+            f.op = if f.op == ChangeOp::Added && c.op != ChangeOp::Deleted { ChangeOp::Added } else { c.op };
+            f.added += c.added;
+            f.removed += c.removed;
+            f.diffs.push(&c.diff);
+        }
+        out
+    }
 }
 
 pub struct Post<'a> {
@@ -87,20 +122,45 @@ pub fn log_posts<'a>(msgs: &'a [Msg], chan: &Channel) -> Vec<Post<'a>> {
 }
 
 /// A DM: the agent's transcript, prompts and replies in full, tools as
-/// one-liners, with its subagents' activity merged in by time.
+/// one-liners, with its subagents' activity merged in by time, and each
+/// turn's file changes gathered at its end.
 pub fn transcript_posts<'a>(tail: &'a Tail, agent: &'a str, kind: Kind, me: &'a str) -> Vec<Post<'a>> {
     let main = tail.entries();
     let main = &main[main.len().saturating_sub(LIMIT * 2)..];
     let since = main.first().map_or(0, |e| e.ts);
-    let mut posts: Vec<Post> = main.iter().map(|e| entry_post(e, agent, kind.as_str(), me, false)).collect();
+    // (entry, author, author kind, from a subagent)
+    let mut entries: Vec<(&Entry, &str, &str, bool)> = main.iter().map(|e| (e, agent, kind.as_str(), false)).collect();
     for sub in &tail.subs {
-        let entries = sub.entries().filter(|e| e.ts >= since);
-        posts.extend(entries.map(|e| entry_post(e, &sub.label, "subagent", me, true)));
+        entries.extend(sub.entries().filter(|e| e.ts >= since).map(|e| (e, sub.label.as_str(), "subagent", true)));
     }
-    posts.sort_by_key(|p| p.ts);
+    entries.sort_by_key(|(e, ..)| e.ts);
+
+    let mut posts = Vec::new();
+    let mut turn: Vec<(i64, &Change)> = Vec::new();
+    let changes_post = |turn: &[(i64, &'a Change)]| {
+        let key = format!("{agent}:changes:{}", turn[0].0);
+        let ts = turn.last().map_or(0, |(ts, _)| *ts);
+        post(key, ts, agent, kind.as_str(), Some(kind.as_str()), None, Body::Changes(Changed::merge(turn)))
+    };
+    for (e, author, author_kind, sub) in entries {
+        match &e.item {
+            Item::Change(c) => turn.push((e.ts, c)),
+            // A prompt to the agent starts a new turn.
+            Item::Prompt { .. } if !sub && !turn.is_empty() => {
+                posts.push(changes_post(&turn));
+                turn.clear();
+                posts.push(entry_post(e, author, author_kind, me, sub));
+            }
+            _ => posts.push(entry_post(e, author, author_kind, me, sub)),
+        }
+    }
+    if !turn.is_empty() {
+        posts.push(changes_post(&turn));
+    }
     arrange(posts)
 }
 
+/// A post for a transcript entry other than a change.
 fn entry_post<'a>(e: &'a Entry, author: &'a str, kind: &'a str, me: &'a str, sub: bool) -> Post<'a> {
     let key = format!("{author}:{}", e.key);
     let tag = Some(if sub { "subagent" } else { kind });
@@ -125,6 +185,7 @@ fn entry_post<'a>(e: &'a Entry, author: &'a str, kind: &'a str, me: &'a str, sub
             p.files = files.iter().map(String::as_str).collect();
             p
         }
+        Item::Change(_) => unreachable!("changes are gathered per turn"),
     }
 }
 
