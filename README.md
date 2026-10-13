@@ -13,6 +13,39 @@ agentrelay doesn't install hooks, wrap your sessions or touch your settings. It
 finds the agents that are already running and talks to them over their own
 local sockets.
 
+## Not a harness, not a multiplexer
+
+Most tools for juggling several coding agents take one of two routes:
+
+- **A harness**, like [opencode](https://opencode.ai), is a coding agent of its
+  own: its own loop, tools, prompts and model setup. Moving to one means
+  leaving Claude Code or Codex behind, along with how they behave and what they
+  ship next.
+- **A multiplexer**, like [herdr](https://herdr.dev), runs your agents inside
+  its own terminal panes. It gives you a workspace, but your agents have to be
+  started in it, and it works with them as terminals.
+
+agentrelay does neither. Your agents stay in their own harnesses, in whatever
+terminal, editor or background process you started them from. agentrelay
+connects to them over the same local IPC they already use: Claude Code's peer
+socket, the one sessions use to message each other, and the Codex app-server.
+Then it puts them all in one chat.
+
+What that gets you:
+
+- **Nothing to migrate.** Keep `claude` and `codex` exactly as they are, with
+  your settings, plugins, permissions and updates. Start agents however you
+  like, and they show up.
+- **Real state, not terminal output.** Presence, replies, tool calls and
+  subagent activity come from the agents' own sessions and transcripts.
+- **Messages land as messages.** What you send arrives through the agent's own
+  messaging, the way one session messages another, not as input typed into a
+  terminal.
+- **Safe to close.** agentrelay holds no agent processes. Quit it or restart it,
+  and your agents keep working.
+- **One place for all of them.** Channels per project, per kind, or everyone at
+  once, from a terminal or your phone.
+
 ## Features
 
 - **Channels.** `#all`, `#claude` and `#codex`, plus a channel for each project.
