@@ -17,7 +17,7 @@ pub fn list() -> Vec<Agent> {
         .filter_map(|a| {
             let name = a.get("name")?.as_str()?.to_string();
             let pid = a.get("pid")?.as_u64()? as u32;
-            let cwd = a.get("cwd").and_then(Value::as_str).unwrap_or("").to_string();
+            let cwd = live_cwd(pid, a.get("cwd").and_then(Value::as_str).unwrap_or(""));
             let presence = match a.get("status").and_then(Value::as_str) {
                 Some("busy") => Presence::Busy,
                 _ => Presence::Online,
@@ -38,6 +38,19 @@ pub fn list() -> Vec<Agent> {
             })
         })
         .collect()
+}
+
+/// The session's folder. Claude records it at start; if it has since been
+/// renamed or moved, the process's own working directory (on Linux) still
+/// points at it.
+fn live_cwd(pid: u32, recorded: &str) -> String {
+    if Path::new(recorded).is_dir() {
+        return recorded.to_string();
+    }
+    match std::fs::read_link(format!("/proc/{pid}/cwd")) {
+        Ok(dir) if dir.is_dir() => dir.display().to_string(),
+        _ => recorded.to_string(),
+    }
 }
 
 /// `~/.claude/projects/<cwd as slug>/<session>.jsonl`, or a search if the slug differs.
