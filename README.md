@@ -70,7 +70,8 @@ In practice:
 
 ## Install
 
-On Linux (x86_64 or ARM64) or macOS (Apple Silicon or Intel):
+On Linux (x86_64 or ARM64, glibc 2.34 or newer, as in Ubuntu 22.04 and Debian 12) or
+macOS (Apple Silicon or Intel):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/samehkhamis/agentrelay/main/install.sh | sh
