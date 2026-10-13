@@ -104,7 +104,7 @@ impl Images {
 }
 
 /// WezTerm is the terminal agentchat talks to directly, not through a
-/// multiplexer (tmux, screen, herdr), which answers the query for itself.
+/// terminal multiplexer, which answers the query for itself.
 fn wezterm_outermost() -> bool {
     let nested = ["TMUX", "STY", "HERDR_ENV"].iter().any(|k| std::env::var_os(k).is_some());
     !nested && std::env::var("TERM_PROGRAM").is_ok_and(|t| t.eq_ignore_ascii_case("wezterm"))
