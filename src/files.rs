@@ -3,7 +3,7 @@
 //! the file exists, so links are never guesses.
 
 use crate::db;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A mention resolved to a file, with the line it pointed at (`main.rs:42`).
 #[derive(Clone, Debug, PartialEq)]
@@ -42,7 +42,7 @@ const LIST_MAX: usize = 50_000;
 
 /// A folder's files, relative to it: a parallel walk with the `ignore` crate
 /// (what fd and ripgrep use), skipping `.gitignore`d and hidden files.
-pub fn list(root: &std::path::Path) -> Vec<String> {
+pub fn list(root: &Path) -> Vec<String> {
     let found = std::sync::Mutex::new(Vec::new());
     ignore::WalkBuilder::new(root).build_parallel().run(|| {
         let found = &found;
@@ -77,22 +77,40 @@ pub fn fuzzy<'a>(files: &'a [String], query: &str, limit: usize) -> Vec<&'a str>
 }
 
 /// Up to this much of a file is shown.
-pub const VIEW_MAX: usize = 512 << 10;
+const VIEW_MAX: usize = 512 << 10;
 
 /// A file's text for viewing; None if it's binary.
-pub fn read_text(path: &std::path::Path) -> Option<String> {
+pub fn read_text(path: &Path) -> Option<String> {
     let mut bytes = std::fs::read(path).ok()?;
     bytes.truncate(VIEW_MAX);
     (!bytes.contains(&0)).then(|| String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// The extension, for highlighting.
-pub fn lang(path: &std::path::Path) -> String {
+pub fn lang(path: &Path) -> String {
     path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
+/// A file a markdown file links to by relative path (`docs/a.md#part`),
+/// if it exists. Opening it still goes through the hub's folder check.
+pub fn linked_file(dir: &Path, url: &str) -> Option<PathBuf> {
+    let url = url.split(['#', '?']).next().unwrap_or("");
+    if url.is_empty() || url.contains(':') || url.starts_with('/') {
+        return None;
+    }
+    let path = dir.join(url).canonicalize().ok()?;
+    path.is_file().then_some(path)
+}
+
+/// An image a markdown file shows by relative path, if it's inside the
+/// file's folder. Previews read these directly, without the hub's check.
+pub fn linked_image(dir: &Path, url: &str) -> Option<PathBuf> {
+    let inside = dir.canonicalize().ok()?;
+    linked_file(dir, url).filter(|p| p.starts_with(&inside))
+}
+
 /// Markdown files get a rendered preview beside their source.
-pub fn is_markdown(path: &std::path::Path) -> bool {
+pub fn is_markdown(path: &Path) -> bool {
     matches!(lang(path).to_ascii_lowercase().as_str(), "md" | "markdown" | "mdx")
 }
 

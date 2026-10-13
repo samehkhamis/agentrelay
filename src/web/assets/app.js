@@ -481,8 +481,7 @@ $("new-form").onsubmit = async (e) => {
 
 // ---------------------------------------------------------------- file panel
 
-let viewing = null; // full path of the open file
-let viewed = null; // its /api/file response
+let viewed = null; // the open file's /api/file response
 
 // The open file, kept across reloads: { channel, file, mode, scroll }.
 const OPEN_FILE = "agentrelay.file";
@@ -504,7 +503,6 @@ function saveFile(change) {
 async function openFile(raw, restore) {
   const r = await api(`/api/file?${new URLSearchParams({ channel: current, file: raw })}`);
   if (r.error) return restore ? saveFile(null) : toast(r.error);
-  viewing = r.full;
   viewed = r;
   $("viewer-path").textContent = r.path;
   $("viewer-path").title = r.full;
@@ -553,7 +551,6 @@ $("viewer-mode").onclick = (e) => {
 };
 
 function closeFile() {
-  viewing = null;
   viewed = null;
   saveFile(null);
   $("viewer").hidden = true;
@@ -572,11 +569,11 @@ for (const id of ["feed", "viewer-body"]) {
 }
 $("viewer-close").onclick = closeFile;
 $("viewer-copy").onclick = async () => {
-  await navigator.clipboard?.writeText(viewing ?? "");
+  await navigator.clipboard?.writeText(viewed?.full ?? "");
   toast("path copied");
 };
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && viewing && !suggestions.length && !$("new-agent").open) closeFile();
+  if (e.key === "Escape" && viewed && !suggestions.length && !$("new-agent").open) closeFile();
 });
 
 // ---------------------------------------------------------------- resizing

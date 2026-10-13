@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct Msg {
@@ -44,7 +44,7 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     }
 }
 
-pub fn db_path() -> PathBuf {
+fn db_path() -> PathBuf {
     match std::env::var("AGENTRELAY_DB") {
         Ok(p) if !p.is_empty() => PathBuf::from(p),
         _ => home().join(".agentrelay").join("chat.db"),
@@ -56,11 +56,24 @@ pub fn data_dir() -> PathBuf {
     db_path().parent().map(PathBuf::from).unwrap_or_else(home)
 }
 
+/// Creates a directory (and its parents) readable only by the user, since
+/// it holds messages and attachments. An existing one is left as it is.
+pub fn create_private_dir(dir: &Path) -> Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+        .with_context(|| format!("creating {}", dir.display()))
+}
+
 pub fn open() -> Result<Connection> {
     let path = db_path();
-    let dir = data_dir();
-    std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    create_private_dir(&data_dir())?;
     let conn = Connection::open(&path).with_context(|| format!("opening {}", path.display()))?;
+    // Owner-only; SQLite gives its -wal and -shm files the same mode.
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.execute_batch(
@@ -97,13 +110,13 @@ pub fn now_ms() -> i64 {
 }
 
 /// Logs a message from the user.
-pub fn post(conn: &Connection, channel: &str, sender: &str, body: &str, files: &[String]) -> Result<i64> {
+pub fn post(conn: &Connection, channel: &str, sender: &str, body: &str, files: &[String]) -> Result<()> {
     conn.execute(
         "INSERT INTO messages (ts, channel, sender, sender_kind, kind, body, files)
          VALUES (?1, ?2, ?3, 'user', 'chat', ?4, ?5)",
         params![now_ms(), channel, sender, body, files.join("\n")],
     )?;
-    Ok(conn.last_insert_rowid())
+    Ok(())
 }
 
 fn row_to_msg(r: &rusqlite::Row) -> rusqlite::Result<Msg> {

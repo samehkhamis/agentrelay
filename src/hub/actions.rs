@@ -157,12 +157,23 @@ fn run_shell(command: &str, cwd: &str) -> (String, Option<i32>) {
         Ok(c) => c,
         Err(e) => return (e.to_string(), None),
     };
-    // Drain both pipes on their own threads so a chatty command can't block.
+    // Drain both pipes on their own threads so a chatty command can't block,
+    // keeping only the end of the output so one can't fill memory either.
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
+            const KEEP: usize = 64 << 10;
             let mut out = Vec::new();
+            let mut buf = [0u8; 8192];
             if let Some(mut p) = pipe {
-                let _ = p.read_to_end(&mut out);
+                while let Ok(n) = p.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    out.extend_from_slice(&buf[..n]);
+                    if out.len() > 2 * KEEP {
+                        out.drain(..out.len() - KEEP);
+                    }
+                }
             }
             out
         })
@@ -170,14 +181,23 @@ fn run_shell(command: &str, cwd: &str) -> (String, Option<i32>) {
     let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
     let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
     let deadline = std::time::Instant::now() + SHELL_TIMEOUT;
+    // Kills the command's whole process group: on timeout, and once the shell
+    // exits, so a backgrounded child can't hold the pipes open.
+    let group = rustix::process::Pid::from_raw(child.id() as i32);
+    let kill_group = || {
+        if let Some(pid) = group {
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::Kill);
+        }
+    };
     let exit = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break status.code(),
+            Ok(Some(status)) => {
+                kill_group();
+                break status.code();
+            }
             Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
             _ => {
-                if let Some(pid) = rustix::process::Pid::from_raw(child.id() as i32) {
-                    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::Kill);
-                }
+                kill_group();
                 let _ = child.wait();
                 break None;
             }
@@ -190,4 +210,25 @@ fn run_shell(command: &str, cwd: &str) -> (String, Option<i32>) {
     }
     let start = text.char_indices().rev().nth(SHELL_OUTPUT).map_or(0, |(i, _)| i);
     (text[start..].to_string(), exit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_shell;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn shell_keeps_only_the_end_of_big_output() {
+        let (out, code) = run_shell("head -c 50000000 /dev/zero | tr '\\0' x; echo; echo done", "/tmp");
+        assert_eq!(code, Some(0));
+        assert!(out.ends_with("done\n") && out.chars().count() <= super::SHELL_OUTPUT + 1, "{}", out.len());
+    }
+
+    #[test]
+    fn shell_returns_when_a_background_child_lingers() {
+        let start = Instant::now();
+        let (out, code) = run_shell("sleep 30 & echo started", "/tmp");
+        assert_eq!((out.trim(), code), ("started", Some(0)));
+        assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+    }
 }

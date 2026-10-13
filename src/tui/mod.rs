@@ -39,12 +39,6 @@ struct Widths {
     pane: Option<u16>,
 }
 
-impl Default for Widths {
-    fn default() -> Self {
-        Widths { sidebar: 30, pane: None }
-    }
-}
-
 /// The pane arrow keys act on; Alt+h / Alt+l move between them.
 #[derive(Clone, Copy, PartialEq)]
 enum Focus {

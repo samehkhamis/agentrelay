@@ -4,7 +4,7 @@
 
 use crate::highlight;
 use pulldown_cmark::{html, CowStr, Event, Tag, TagEnd};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Renders markdown; inline code that `is_file` accepts becomes a file link
 /// the page opens in its file panel.
@@ -65,7 +65,7 @@ fn render(text: &str, file_link: &dyn Fn(&str) -> Option<String>, dir: Option<&P
                 None => events.push(Event::Code(t)),
             },
             (_, Event::Start(Tag::Link { link_type, dest_url, title, id })) => {
-                let file = dir.and_then(|d| local_file(d, &dest_url));
+                let file = dir.and_then(|d| crate::files::linked_file(d, &dest_url));
                 links.push(file.is_some());
                 match file {
                     Some(f) => events.push(Event::Html(format!("<a class=\"file\" data-file=\"{}\">", escape(&f.display().to_string())).into())),
@@ -97,24 +97,12 @@ fn render(text: &str, file_link: &dyn Fn(&str) -> Option<String>, dir: Option<&P
     out
 }
 
-/// A relative link's target, if it's a file. Opening it still goes through
-/// the hub's folder check.
-fn local_file(dir: &Path, url: &str) -> Option<PathBuf> {
-    let url = url.split('#').next().unwrap_or("");
-    if url.is_empty() || url.contains(':') || url.starts_with('/') {
-        return None;
-    }
-    let path = dir.join(url).canonicalize().ok()?;
-    path.is_file().then_some(path)
-}
-
 /// A local image under `dir` as a data URL, so the page needs no route to
 /// fetch it.
 fn inline_image(dir: &Path, url: &str) -> Option<String> {
     use base64::Engine;
     const MAX: u64 = 5 << 20;
-    // Inlining skips the hub's check, so only images under the file's folder.
-    let path = local_file(dir, url).filter(|p| dir.canonicalize().is_ok_and(|d| p.starts_with(d)))?;
+    let path = crate::files::linked_image(dir, url)?;
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     // SVG is safe as an <img> (no scripts run), though not served as a page.
     let mime = if ext == "svg" { "image/svg+xml" } else { crate::uploads::mime(&path) };

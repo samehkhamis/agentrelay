@@ -436,7 +436,6 @@ body.viewing { grid-template-columns: var(--sidebar-w, 260px) minmax(0, 1fr) var
 .body.preview img { max-width: 100%; border-radius: 4px; vertical-align: middle; }
 .body.preview pre.code { margin: 8px 0 12px; }
 #viewer-body { flex: 1; overflow: auto; }
-#viewer-body .error { padding: 16px; color: var(--dim); }
 pre.file-view { margin: 0; padding: 8px 0; min-height: 100%; background: var(--code-bg); font: 12.5px/1.55 var(--mono); }
 pre.file-view > code > span { display: block; min-height: 1.55em; padding-right: 16px; }
 pre.file-view .ln { display: inline-block; width: 4.5em; padding-right: 1em; color: var(--dim); text-align: right; user-select: none; opacity: .7; }

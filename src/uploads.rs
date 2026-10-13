@@ -4,12 +4,13 @@
 
 use crate::db;
 use anyhow::{bail, Context, Result};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 /// Largest attachment accepted.
 pub const MAX_BYTES: usize = 25 << 20;
 
-pub fn dir() -> PathBuf {
+fn dir() -> PathBuf {
     db::data_dir().join("uploads")
 }
 
@@ -18,13 +19,13 @@ pub fn save(name: &str, bytes: &[u8]) -> Result<PathBuf> {
     if bytes.len() > MAX_BYTES {
         bail!("{name} is larger than {} MB", MAX_BYTES >> 20);
     }
-    std::fs::create_dir_all(dir())?;
+    db::create_private_dir(&dir())?;
     let (ts, name) = (db::now_ms(), sanitize(name));
     // Same name in the same millisecond (two `shot.png`s dropped together):
     // bump the stamp rather than overwrite.
     for n in 0.. {
         let path = dir().join(format!("{}-{name}", ts + n));
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        match std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path) {
             Ok(mut f) => {
                 std::io::Write::write_all(&mut f, bytes).with_context(|| format!("writing {}", path.display()))?;
                 return Ok(path);
@@ -46,7 +47,7 @@ pub fn named(name: &str) -> (PathBuf, bool) {
 /// Stores bytes under a fixed name; returns the stored path.
 pub fn store_named(name: &str, bytes: &[u8]) -> Result<PathBuf> {
     let (path, _) = named(name);
-    std::fs::create_dir_all(dir())?;
+    db::create_private_dir(&dir())?;
     std::fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
     Ok(path)
 }

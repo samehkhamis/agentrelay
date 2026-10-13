@@ -1,6 +1,7 @@
 //! The file pane: a file a feed mentions, highlighted, with line numbers,
 //! opened at the mentioned line. Markdown files can also show rendered.
 
+use super::feed::Slot;
 use super::images::Images;
 use super::markdown;
 use crate::files::{self, FileRef};
@@ -136,14 +137,6 @@ struct Preview {
     slots: Vec<Slot>,
 }
 
-/// An image's place in the preview.
-struct Slot {
-    line: usize,
-    cols: u16,
-    rows: u16,
-    path: String,
-}
-
 impl Preview {
     fn new(text: &str, dir: &str, width: u16, mut images: Option<&mut Images>) -> Preview {
         let is_file = |c: &str| files::resolve(dir, c).is_some();
@@ -156,7 +149,7 @@ impl Preview {
             // An image's alt text, when the image can be drawn, becomes blank
             // rows for it.
             let image = found.next_if(|(at, _)| at.start == i).and_then(|(at, url)| {
-                let path = local_image(dir, &url)?;
+                let path = files::linked_image(std::path::Path::new(dir), &url)?.display().to_string();
                 let (cols, rows) = images.as_deref_mut()?.size(&path, width)?;
                 skip = at;
                 Some(Slot { line: lines.len(), cols, rows, path })
@@ -172,15 +165,6 @@ impl Preview {
         }
         Preview { width, lines, slots }
     }
-}
-
-/// A relative image URL as a file beside the markdown file.
-fn local_image(dir: &str, url: &str) -> Option<String> {
-    if url.contains("://") || url.starts_with("data:") {
-        return None;
-    }
-    let path = std::path::Path::new(dir).join(url.split(['#', '?']).next()?);
-    path.is_file().then(|| path.display().to_string())
 }
 
 /// A left margin for preview lines.

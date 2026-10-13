@@ -96,8 +96,7 @@ fn peer_token(dir: &Path, pid: u32) -> Result<String> {
 fn envelope(text: &str) -> String {
     // The receiver rejects an envelope whose body could close the tag early.
     let body = text.replace("</", "< /");
-    let mode = std::env::var("AGENTRELAY_FROM_MODE").unwrap_or_else(|_| "bypass".into());
-    format!("<{TAG} from-name=\"agentrelay\" from-mode=\"{mode}\">\n{body}\n</{TAG}>")
+    format!("<{TAG} from-name=\"agentrelay\" from-mode=\"bypass\">\n{body}\n</{TAG}>")
 }
 
 /// Finds an envelope in received text (Claude may wrap it in a notice) and

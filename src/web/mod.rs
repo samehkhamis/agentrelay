@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server};
 
@@ -54,7 +54,7 @@ const TAILNET_REFRESH: Duration = Duration::from_secs(60);
 
 impl Shared {
     fn tailnet(&self) -> Option<Tailnet> {
-        let mut cached = self.tailnet.lock().unwrap();
+        let mut cached = lock(&self.tailnet);
         if cached.0.is_none_or(|at| at.elapsed() > TAILNET_REFRESH) {
             *cached = (Some(Instant::now()), tailnet());
         }
@@ -82,7 +82,7 @@ pub fn serve(port: u16) -> Result<()> {
 
     let poller = shared.clone();
     std::thread::spawn(move || loop {
-        if let Err(e) = poller.hub.lock().unwrap().poll() {
+        if let Err(e) = lock(&poller.hub).poll() {
             eprintln!("poll: {e:#}"); // goes to server.log; try again next tick
         }
         std::thread::sleep(POLL);
@@ -101,7 +101,7 @@ fn info_path() -> PathBuf {
 }
 
 /// The port of a running server, if one answers.
-pub fn running() -> Option<u16> {
+fn running() -> Option<u16> {
     let info: Value = serde_json::from_str(&std::fs::read_to_string(info_path()).ok()?).ok()?;
     let port = info.get("port")?.as_u64()? as u16;
     call(port, "GET", "/api/ping").ok().map(|_| port)
@@ -113,7 +113,7 @@ pub fn start(port: u16) -> Result<u16> {
         return Ok(p);
     }
     use std::os::unix::process::CommandExt;
-    std::fs::create_dir_all(db::data_dir())?;
+    db::create_private_dir(&db::data_dir())?;
     let log = std::fs::File::create(db::data_dir().join("server.log"))?;
     std::process::Command::new(std::env::current_exe()?)
         .args(["serve", "--port", &port.to_string()])
@@ -182,6 +182,12 @@ fn tailnet() -> Option<Tailnet> {
 
 // ---------------------------------------------------------------- routing
 
+/// Locks shared state. A panic while it was held (a bug in one request)
+/// leaves it usable rather than failing every request after.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn header<'a>(req: &'a Request, name: &str) -> Option<&'a str> {
     req.headers().iter().find(|h| h.field.as_str().as_str().eq_ignore_ascii_case(name)).map(|h| h.value.as_str())
 }
@@ -189,7 +195,15 @@ fn header<'a>(req: &'a Request, name: &str) -> Option<&'a str> {
 fn respond(req: Request, status: u16, content_type: &str, body: impl Into<Vec<u8>>) {
     let ct = Header::from_bytes("Content-Type", content_type).expect("valid header");
     let nostore = Header::from_bytes("Cache-Control", "no-store").expect("valid header");
-    let _ = req.respond(Response::from_data(body.into()).with_status_code(status).with_header(ct).with_header(nostore));
+    let response = Response::from_data(body.into()).with_status_code(status).with_header(ct).with_header(nostore);
+    let _ = req.respond(no_framing(response));
+}
+
+/// Other sites may not frame the page: it acts on whoever is looking at it.
+fn no_framing<R: std::io::Read>(response: Response<R>) -> Response<R> {
+    let deny = Header::from_bytes("X-Frame-Options", "DENY").expect("valid header");
+    let csp = Header::from_bytes("Content-Security-Policy", "frame-ancestors 'none'").expect("valid header");
+    response.with_header(deny).with_header(csp)
 }
 
 fn respond_json(req: Request, v: Value) {
@@ -205,8 +219,12 @@ fn handle(mut req: Request, shared: &Shared) {
     if path.starts_with("/api/") && header(&req, API_HEADER).is_none() {
         return respond(req, 403, "text/plain", "missing API header");
     }
+    // Only POSTs carry a body, and only uploads need a large one.
     let mut raw = Vec::new();
-    let _ = req.as_reader().take(uploads::MAX_BYTES as u64 + 1).read_to_end(&mut raw);
+    if *req.method() == Method::Post {
+        let limit = if path == "/api/upload" { uploads::MAX_BYTES + 1 } else { 1 << 20 };
+        let _ = req.as_reader().take(limit as u64).read_to_end(&mut raw);
+    }
     let body: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
     let arg = |k: &str| query_arg(&query, k).or_else(|| body.get(k).and_then(Value::as_str).map(str::to_string));
 
@@ -220,20 +238,20 @@ fn handle(mut req: Request, shared: &Shared) {
                 let nosniff = Header::from_bytes("X-Content-Type-Options", "nosniff").expect("valid header");
                 let ct = Header::from_bytes("Content-Type", uploads::mime(&path)).expect("valid header");
                 let data = std::fs::read(&path).unwrap_or_default();
-                let _ = req.respond(Response::from_data(data).with_header(ct).with_header(nosniff));
+                let _ = req.respond(no_framing(Response::from_data(data).with_header(ct).with_header(nosniff)));
             }
             None => respond(req, 404, "text/plain", "not found"),
         },
         (Method::Get, "/api/ping") => respond_json(req, json!({ "ok": true })),
         (Method::Get, "/api/state") => respond_json(req, state(shared)),
         (Method::Get, "/api/folders") => {
-            let folders = shared.hub.lock().unwrap().folders();
+            let folders = lock(&shared.hub).folders();
             let list: Vec<Value> = folders.iter().map(|f| json!({ "path": f, "label": db::tilde(f) })).collect();
             respond_json(req, json!(list))
         }
         (Method::Get, "/api/tool") => {
             // A tool call's full input, rendered on demand when expanded.
-            let hub = shared.hub.lock().unwrap();
+            let hub = lock(&shared.hub);
             let full = hub.channel(&arg("channel").unwrap_or_default()).and_then(|c| hub.tool_full(c, &arg("key").unwrap_or_default()));
             drop(hub);
             respond_json(req, json!({ "html": full.map(|f| render::markdown(&f, &|_| false)) }))
@@ -241,7 +259,7 @@ fn handle(mut req: Request, shared: &Shared) {
         (Method::Get, "/api/file") => {
             // A file a feed mentions, highlighted for the file panel, plus a
             // rendered preview for markdown.
-            let mut hub = shared.hub.lock().unwrap();
+            let mut hub = lock(&shared.hub);
             let channel = arg("channel").unwrap_or_default();
             hub.follow(&channel);
             let opened = match hub.channel(&channel) {
@@ -262,7 +280,7 @@ fn handle(mut req: Request, shared: &Shared) {
             respond_json(req, v)
         }
         (Method::Get, "/api/complete") => {
-            let list = shared.hub.lock().unwrap().complete(&arg("channel").unwrap_or_default(), &arg("text").unwrap_or_default());
+            let list = lock(&shared.hub).complete(&arg("channel").unwrap_or_default(), &arg("text").unwrap_or_default());
             respond_json(req, json!(list))
         }
         (Method::Get, "/api/feed") => {
@@ -270,7 +288,7 @@ fn handle(mut req: Request, shared: &Shared) {
             respond_json(req, v)
         }
         (Method::Post, "/api/seen") => {
-            shared.hub.lock().unwrap().mark_seen(&arg("channel").unwrap_or_default());
+            lock(&shared.hub).mark_seen(&arg("channel").unwrap_or_default());
             respond_json(req, json!({ "ok": true }))
         }
         (Method::Post, "/api/new") => {
@@ -335,7 +353,7 @@ fn percent_decode(s: &str) -> String {
 // ---------------------------------------------------------------- API
 
 fn state(shared: &Shared) -> Value {
-    let hub = shared.hub.lock().unwrap();
+    let hub = lock(&shared.hub);
     let channels: Vec<Value> = hub
         .channels
         .iter()
@@ -361,26 +379,23 @@ fn state(shared: &Shared) -> Value {
     json!({
         "me": hub.me,
         "online": hub.online(),
-        "ready": !hub.agents.is_empty(),
         "channels": channels,
         "statuses": hub.last_statuses(),
-        "help": hub::help(),
         "theme": theme::t().name,
         "themes": theme::names(),
-
     })
 }
 
 /// The channel's posts with their HTML, or `same: true` if `v` is current.
 fn feed(shared: &Shared, channel: &str, v: Option<&str>) -> Value {
-    let mut hub = shared.hub.lock().unwrap();
+    let mut hub = lock(&shared.hub);
     hub.follow(channel);
     let Some(chan) = hub.channel(channel).cloned() else { return json!({ "error": "no such channel" }) };
     let version = hub.version(&chan);
     if v == Some(version.as_str()) {
         return json!({ "v": version, "same": true });
     }
-    let mut cache = shared.html.lock().unwrap();
+    let mut cache = lock(&shared.html);
     if cache.len() > 20_000 {
         cache.clear();
     }
@@ -436,7 +451,7 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
         Some(Input::New { kind, folder, prompt }) => return start_agent(shared, channel, kind, folder.as_deref(), &prompt),
         Some(Input::Open(query)) => {
             // Resolve a query (best fuzzy match) here; the page opens the path.
-            let hub = shared.hub.lock().unwrap();
+            let hub = lock(&shared.hub);
             let found = hub.channel(channel).map(|c| hub.open_query(c, &query));
             return match found {
                 Some(Ok((f, _))) => json!({ "open": f.path }),
@@ -445,21 +460,21 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
             };
         }
         Some(Input::Rename(name)) => {
-            let renamed = shared.hub.lock().unwrap().rename(channel, &name); // run outside the lock
+            let renamed = lock(&shared.hub).rename(channel, &name); // run outside the lock
             return match renamed {
                 Ok((task, follow)) => json!({ "note": task.run(), "channel": follow }),
                 Err(e) => json!({ "note": e.to_string() }),
             };
         }
         Some(Input::Shell(cmd)) => {
-            let task = shared.hub.lock().unwrap().shell(channel, &cmd);
+            let task = lock(&shared.hub).shell(channel, &cmd);
             return run_task(task);
         }
         Some(Input::Theme(Some(name))) => return set_theme(shared, &name),
         _ => return json!({}),
     };
     // Log under the lock; deliver without it, since sockets can be slow.
-    let delivery = shared.hub.lock().unwrap().send(channel, &body, files);
+    let delivery = lock(&shared.hub).send(channel, &body, files);
     match delivery {
         Err(e) => json!({ "note": format!("failed: {e}") }),
         Ok(None) => json!({ "note": "nobody online here to deliver to" }),
@@ -476,12 +491,12 @@ fn run_task(task: Result<hub::Task>) -> Value {
 }
 
 fn start_agent(shared: &Shared, channel: &str, kind: crate::agents::Kind, folder: Option<&str>, prompt: &str) -> Value {
-    let task = shared.hub.lock().unwrap().start_agent(channel, kind, folder, prompt);
+    let task = lock(&shared.hub).start_agent(channel, kind, folder, prompt);
     run_task(task)
 }
 
 fn set_theme(shared: &Shared, name: &str) -> Value {
-    match shared.hub.lock().unwrap().set_theme(name) {
+    match lock(&shared.hub).set_theme(name) {
         Ok(true) => json!({ "note": format!("theme: {name}"), "theme": name }),
         _ => json!({ "note": format!("no theme {name}; {}", hub::theme_list()) }),
     }

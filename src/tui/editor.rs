@@ -51,8 +51,8 @@ impl Editor {
         self.text.chars().count()
     }
 
-    /// Applies an editing key. False if the key isn't an editing key.
-    pub fn handle(&mut self, k: KeyEvent) -> bool {
+    /// Applies an editing key; other keys do nothing.
+    pub fn handle(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
         match k.code {
@@ -95,9 +95,8 @@ impl Editor {
             KeyCode::Right => self.cursor = (self.cursor + 1).min(self.len()),
             KeyCode::Home => self.cursor = 0,
             KeyCode::End => self.cursor = self.len(),
-            _ => return false,
+            _ => {}
         }
-        true
     }
 
     /// The visible slice for a box `width` wide, scrolled so the cursor
