@@ -203,6 +203,13 @@ impl App {
                 let task = self.hub.start_agent(&self.selected, kind, folder.as_deref(), &prompt);
                 self.background(task, format!("starting {}…", kind.as_str()));
             }
+            Some(Input::Rename(name)) => match self.hub.rename(&self.selected.clone(), &name) {
+                Ok((note, follow)) => {
+                    self.selected = follow; // a renamed Claude DM reappears under its new name
+                    self.notify(note);
+                }
+                Err(e) => self.notify(e.to_string()),
+            },
             Some(Input::Shell(cmd)) => {
                 let task = self.hub.shell(&self.selected, &cmd);
                 self.background(task, "running…".into());

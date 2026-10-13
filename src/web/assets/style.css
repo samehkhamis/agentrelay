@@ -105,11 +105,22 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 50px;
+  min-height: 64px;
   padding: 0 20px;
   border-bottom: 1px solid var(--rule);
 }
-.heading { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
+/* Title row: the channel or agent, then its conversation title; details below. */
+.heading { display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 1px; min-width: 0; padding: 8px 0; }
+.title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#headline {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 17px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#headline:not(:empty)::before { content: "·"; margin-right: 8px; color: var(--muted); }
 #menu {
   display: none;
   position: relative;
@@ -137,7 +148,7 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
   font: 700 10px/16px var(--font);
 }
 #backdrop { display: none; }
-#title { margin: 0; font-size: 18px; font-weight: 800; white-space: nowrap; }
+#title { margin: 0; font-size: 20px; font-weight: 800; white-space: nowrap; }
 #detail { overflow: hidden; color: var(--muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 #toast { flex: none; color: var(--user); font-size: 13px; font-style: italic; transition: opacity .3s; }
 
@@ -323,7 +334,8 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
   #menu { display: block; }
   #header { gap: 6px; min-height: 52px; padding: 0 12px; padding-top: env(safe-area-inset-top); }
   #title { font-size: 17px; }
-  #detail { display: none; }
+  #detail { font-size: 12px; }
+  #headline { font-size: 15px; }
   .post { padding: 2px 12px; }
   .day { margin: 16px 12px 4px; }
   #composer { padding: 0 10px 10px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }

@@ -69,6 +69,12 @@ impl AppServer {
         r.pointer("/thread/id").and_then(Value::as_str).map(str::to_string).ok_or_else(|| anyhow!("no thread id"))
     }
 
+    /// Names the thread, as `/rename` does in Codex.
+    pub fn rename(&mut self, thread: &str, name: &str) -> Result<()> {
+        self.call("thread/name/set", json!({ "threadId": thread, "name": name }))?;
+        Ok(())
+    }
+
     /// Runs a command in the thread's shell, like `!` in Codex: the output is
     /// recorded in the thread without starting a model turn.
     pub fn shell_command(&mut self, thread: &str, command: &str) -> Result<()> {

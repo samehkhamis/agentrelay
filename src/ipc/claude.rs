@@ -21,6 +21,17 @@ fn read_json(p: &Path) -> Result<Value> {
 }
 
 pub fn send(pid: u32, text: &str) -> Result<()> {
+    let msg = json!({ "type": "user", "from": "agentchat", "message": { "role": "user", "content": envelope(text) } });
+    write(pid, &msg)
+}
+
+/// Renames the session (the socket's `rename` control), as `/rename` does in it.
+pub fn rename(pid: u32, name: &str) -> Result<()> {
+    write(pid, &json!({ "type": "control", "action": "rename", "name": name }))
+}
+
+/// Writes one frame to a session's socket, after the auth line.
+fn write(pid: u32, frame: &Value) -> Result<()> {
     let dir = home().join(".claude/sessions");
     let session = read_json(&dir.join(format!("{pid}.json")))?;
     let sock = session
@@ -32,8 +43,7 @@ pub fn send(pid: u32, text: &str) -> Result<()> {
     let mut s = UnixStream::connect(sock).with_context(|| format!("connecting to {sock}"))?;
     s.set_write_timeout(Some(Duration::from_secs(5)))?;
     let auth = json!({ "type": "auth", "token": token });
-    let msg = json!({ "type": "user", "from": "agentchat", "message": { "role": "user", "content": envelope(text) } });
-    s.write_all(format!("{auth}\n{msg}\n").as_bytes())?;
+    s.write_all(format!("{auth}\n{frame}\n").as_bytes())?;
     s.shutdown(std::net::Shutdown::Write)?;
     Ok(())
 }

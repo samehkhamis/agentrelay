@@ -14,6 +14,7 @@ let sound = localStorage.getItem("agentchat.sound") !== "off";
 let toastTimer = null;
 let pending = []; // uploaded files waiting to be sent: {id, name, image}
 let shell = false; // shell mode: "!" typed into an empty composer
+let missing = 0; // state refreshes the open channel has been absent for
 let suggestions = []; // slash-command completions from the server
 let suggestion = 0;
 
@@ -85,7 +86,13 @@ async function refreshState() {
       toast(`${agent} replied`);
     }
   }
-  if (!channel(current)) current = "all";
+  // A channel can vanish briefly (a renamed agent reappears under its new
+  // name); fall back to #all only if it stays gone.
+  missing = channel(current) ? 0 : missing + 1;
+  if (missing > 4) {
+    current = "all";
+    missing = 0;
+  }
   renderSidebar();
   renderHeader();
 }
@@ -152,6 +159,7 @@ function renderHeader() {
   if (!c) return;
   $("title-dot").replaceChildren(...(c.section === "direct" ? [presenceDot(c.presence)] : []));
   $("title").textContent = c.title;
+  $("headline").textContent = c.headline || "";
   $("detail").textContent = c.detail;
   setPlaceholder();
   document.title = `${c.title} · agentchat`;
@@ -288,6 +296,10 @@ async function submit() {
   } else if (r.note) {
     toast(r.note);
     if (r.theme) await refreshState();
+    if (r.channel && r.channel !== current) {
+      current = r.channel;
+      localStorage.setItem("agentchat.channel", current);
+    }
   }
   feedVersion = null;
   refreshFeed();

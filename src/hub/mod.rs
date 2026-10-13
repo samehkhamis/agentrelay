@@ -22,13 +22,14 @@ use std::sync::mpsc::Receiver;
 const HISTORY: i64 = 3000;
 const STATUS_ASK: &str = "Quick status update please: what are you working on, what's done, \
                           and is anything blocked? 2-3 lines.";
-pub const HELP: &str =
-    "commands: /status  /new claude|codex [folder] [prompt]  !command (in a DM)  /theme [name]  /sound  /quit";
+pub const HELP: &str = "commands: /status  /new claude|codex [folder] [prompt]  /rename <name> (in a DM)  \
+                        !command (in a DM)  /theme [name]  /sound  /quit";
 
 /// Slash commands: (name, usage after the name, what it does).
-const COMMANDS: [(&str, &str, &str); 5] = [
+const COMMANDS: [(&str, &str, &str); 6] = [
     ("/status", "", "ask everyone here for a status update"),
     ("/new", "claude|codex [folder] [prompt]", "start an agent"),
+    ("/rename", "<name>", "rename this DM's conversation"),
     ("/theme", "[name]", "switch the theme for every UI"),
     ("/sound", "", "turn the reply chime on or off"),
     ("/quit", "", "leave agentchat"),
@@ -101,6 +102,8 @@ pub enum Input {
     New { kind: Kind, folder: Option<String>, prompt: String },
     /// `!command`: run it in a DM's agent's folder.
     Shell(String),
+    /// `/rename <name>`: rename a DM's conversation.
+    Rename(String),
     /// `/theme name`, or `/theme` alone to list them.
     Theme(Option<String>),
     ToggleSound,
@@ -112,6 +115,10 @@ pub fn parse_input(text: &str) -> Option<Input> {
     let text = text.trim();
     if let Some(cmd) = text.strip_prefix('!') {
         return (!cmd.trim().is_empty()).then(|| Input::Shell(cmd.trim().to_string()));
+    }
+    if let Some(name) = text.strip_prefix("/rename") {
+        let name = name.trim();
+        return Some(if name.is_empty() { Input::Help } else { Input::Rename(name.to_string()) });
     }
     if let Some(rest) = text.strip_prefix("/new ") {
         let (kind, rest) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
@@ -337,14 +344,19 @@ impl Hub {
         }
     }
 
+    /// A DM's conversation title, shown beside the agent's name.
+    pub fn headline(&self, chan: &Channel) -> Option<String> {
+        (chan.section == Section::Direct).then(|| self.members(chan).first()?.title.clone()).flatten()
+    }
+
     /// The line under the channel title.
     pub fn detail(&self, chan: &Channel) -> String {
         let members = self.members(chan);
         if chan.section == Section::Direct {
             return match members.first() {
                 Some(a) => {
-                    let title = a.title.as_deref().map(|t| format!(" · {t}")).unwrap_or_default();
-                    format!("{} · {} · {}{title}", a.kind.as_str(), a.presence.label(), a.cwd)
+                    let home = db::home().display().to_string();
+                    format!("{} · {} · {}", a.kind.as_str(), a.presence.label(), a.cwd.replacen(&home, "~", 1))
                 }
                 None => "offline".into(),
             };
@@ -445,15 +457,37 @@ impl Hub {
         })))
     }
 
+    /// The online agent behind a DM, for commands aimed at one agent.
+    fn dm_agent(&self, chan_id: &str, what: &str) -> Result<Agent> {
+        let chan = self.channel(chan_id).ok_or_else(|| anyhow::anyhow!("no channel"))?;
+        match (chan.section, self.members(chan).first()) {
+            (Section::Direct, Some(a)) if a.presence != Presence::Away => Ok((*a).clone()),
+            _ => anyhow::bail!("{what} works in a DM with an online agent"),
+        }
+    }
+
+    /// Renames a DM's conversation, as `/rename` does in the agent: a Claude
+    /// session takes the new name (so its DM moves), a Codex thread gets it
+    /// as its title. Returns the note and the channel to follow.
+    pub fn rename(&self, chan_id: &str, name: &str) -> Result<(String, String)> {
+        let agent = self.dm_agent(chan_id, "/rename")?;
+        match &agent.address {
+            Address::Claude(pid) => {
+                ipc::claude::rename(*pid, name)?;
+                Ok((format!("renamed {} to {name}", agent.name), format!("dm:{name}")))
+            }
+            Address::Codex(thread) => {
+                ipc::codex::AppServer::connect()?.rename(thread, name)?;
+                Ok((format!("renamed {}'s thread to {name}", agent.name), chan_id.to_string()))
+            }
+        }
+    }
+
     /// Runs a command for a DM's agent, like `!` in its own terminal. Codex
     /// runs it in the thread's shell and records it there; for Claude,
     /// agentchat runs it in the agent's folder and sends the output to it.
     pub fn shell(&self, chan_id: &str, command: &str) -> Result<Task> {
-        let chan = self.channel(chan_id).ok_or_else(|| anyhow::anyhow!("no channel"))?;
-        let agent = match (chan.section, self.members(chan).first()) {
-            (Section::Direct, Some(a)) if a.presence != Presence::Away => (*a).clone(),
-            _ => anyhow::bail!("!commands run in a DM with an online agent"),
-        };
+        let agent = self.dm_agent(chan_id, "!command")?;
         let (command, me) = (command.to_string(), self.me.clone());
         Ok(Task(Box::new(move || {
             let done = match &agent.address {
@@ -518,6 +552,7 @@ mod tests {
         use super::completions;
         let labels = |line: &str| completions(line, &["/home/x/code/infra".into()]).into_iter().map(|c| c.line).collect::<Vec<_>>();
         assert_eq!(labels("/s"), ["/status", "/sound"]);
+        assert_eq!(labels("/re"), ["/rename "]);
         assert_eq!(labels("/new c"), ["/new claude ", "/new codex "]);
         assert_eq!(labels("/theme dra"), ["/theme dracula"]);
         assert!(labels("hello").is_empty());

@@ -274,6 +274,7 @@ fn state(shared: &Shared) -> Value {
                 "unread": hub.unread(c),
                 "members": hub.members(c).len(),
                 "detail": hub.detail(c),
+                "headline": hub.headline(c),
             })
         })
         .collect();
@@ -353,6 +354,12 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
         Some(Input::New { kind, folder, prompt }) => {
             let task = shared.hub.lock().unwrap().start_agent(channel, kind, folder.as_deref(), &prompt);
             return json!({ "note": task.map_or_else(|e| e.to_string(), hub::Task::run) });
+        }
+        Some(Input::Rename(name)) => {
+            return match shared.hub.lock().unwrap().rename(channel, &name) {
+                Ok((note, follow)) => json!({ "note": note, "channel": follow }),
+                Err(e) => json!({ "note": e.to_string() }),
+            };
         }
         Some(Input::Shell(cmd)) => {
             let task = shared.hub.lock().unwrap().shell(channel, &cmd);

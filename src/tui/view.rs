@@ -27,7 +27,7 @@ impl App {
     pub(super) fn draw(&mut self, f: &mut Frame) {
         let [side, main] = Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(20)]).areas(f.area());
         let [header, body, composer] =
-            Layout::vertical([Constraint::Length(2), Constraint::Min(1), Constraint::Length(3)]).areas(main);
+            Layout::vertical([Constraint::Length(3), Constraint::Min(1), Constraint::Length(3)]).areas(main);
         self.sidebar_area = side;
         self.feed_area = body;
         let th = theme::t();
@@ -139,21 +139,27 @@ impl App {
 
     // ------------------------------------------------------------ header
 
+    /// Two lines: the channel or agent with its conversation title, then details.
     fn draw_header(&self, f: &mut Frame, area: Rect) {
         let c = self.current();
-        let dim = Style::new().fg(theme::t().dim);
-        let mut line = match c.section {
-            Section::Direct => Line::from(vec![presence_dot(c.presence), Span::raw(c.name().to_string()).bold()]),
+        let th = theme::t();
+        let dim = Style::new().fg(th.dim);
+        let mut title = match c.section {
+            Section::Direct => Line::from(vec![Span::raw(" "), presence_dot(c.presence), Span::raw(c.name().to_string()).bold()]),
             _ => Line::from(Span::raw(format!(" {}", c.title())).bold()),
         };
-        line.push_span(Span::styled(format!("  {}", self.hub.detail(c)), dim));
-        if let Some((t, _)) = self.toast.as_ref().filter(|(_, at)| at.elapsed() < TOAST_FOR) {
-            let pad = (area.width as usize).saturating_sub(line.width() + t.width() + 3);
-            line.push_span(Span::raw(" ".repeat(pad)));
-            line.push_span(Span::styled(format!("{t} "), Style::new().fg(theme::t().user).italic()));
+        if let Some(headline) = self.hub.headline(c) {
+            title.push_span(Span::styled("  ·  ", dim));
+            title.push_span(Span::styled(headline, Style::new().fg(th.fg).bold()));
         }
+        if let Some((t, _)) = self.toast.as_ref().filter(|(_, at)| at.elapsed() < TOAST_FOR) {
+            let pad = (area.width as usize).saturating_sub(title.width() + t.width() + 3);
+            title.push_span(Span::raw(" ".repeat(pad)));
+            title.push_span(Span::styled(format!("{t} "), Style::new().fg(th.user).italic()));
+        }
+        let detail = Line::styled(format!(" {}", self.hub.detail(c)), dim);
         let block = Block::new().borders(Borders::BOTTOM).border_style(dim);
-        f.render_widget(Paragraph::new(line).block(block), area);
+        f.render_widget(Paragraph::new(vec![title, detail]).block(block), area);
     }
 
     // ------------------------------------------------------------ feed
