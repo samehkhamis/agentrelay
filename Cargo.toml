@@ -15,7 +15,6 @@ nucleo-matcher = "0.3.1"
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
 ratatui = "0.30.2"
 ratatui-image = { version = "11", default-features = false, features = ["crossterm", "image-defaults"] }
-rodio = { version = "0.23.0", default-features = false, features = ["playback"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rustix = { version = "0.38", features = ["process"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -25,7 +24,10 @@ tiny_http = "0.12.0"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 unicode-width = "0.2.2"
 
-# A pure-Rust PulseAudio client for the chime (reaches WSLg); other systems use
-# rodio's default output.
+# The chime: on Linux a pure-Rust PulseAudio client (reaches WSLg, and links no
+# system sound library); elsewhere rodio's default output.
 [target.'cfg(target_os = "linux")'.dependencies]
-cpal = { version = "0.18.2", features = ["pulseaudio"] }
+pulseaudio = "0.3.1"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rodio = { version = "0.23.0", default-features = false, features = ["playback"] }
