@@ -484,9 +484,26 @@ $("new-form").onsubmit = async (e) => {
 let viewing = null; // full path of the open file
 let viewed = null; // its /api/file response
 
-async function openFile(raw) {
+// The open file, kept across reloads: { channel, file, mode, scroll }.
+const OPEN_FILE = "agentrelay.file";
+function savedFile() {
+  try {
+    return JSON.parse(localStorage.getItem(OPEN_FILE));
+  } catch {
+    return null;
+  }
+}
+function saveFile(change) {
+  try {
+    if (change) localStorage.setItem(OPEN_FILE, JSON.stringify({ ...savedFile(), ...change }));
+    else localStorage.removeItem(OPEN_FILE);
+  } catch {}
+}
+
+// Opens a file in the panel. `restore` (a saved state) reopens it as it was.
+async function openFile(raw, restore) {
   const r = await api(`/api/file?${new URLSearchParams({ channel: current, file: raw })}`);
-  if (r.error) return toast(r.error);
+  if (r.error) return restore ? saveFile(null) : toast(r.error);
   viewing = r.full;
   viewed = r;
   $("viewer-path").textContent = r.path;
@@ -494,9 +511,29 @@ async function openFile(raw) {
   $("viewer-mode").hidden = !r.preview;
   $("viewer").hidden = false;
   document.body.classList.add("viewing");
+  saveFile({ channel: current, file: r.line ? `${r.full}:${r.line}` : r.full, scroll: 0 });
   // Markdown opens as a preview, unless the link points at a line.
-  showFile(r.preview && !r.line ? "preview" : "source");
+  showFile(restore?.mode ?? (r.preview && !r.line ? "preview" : "source"));
+  if (restore?.scroll) {
+    const body = $("viewer-body");
+    body.scrollTop = restore.scroll;
+    // A preview's images take their height as they load; scroll again after.
+    await Promise.all([...body.querySelectorAll("img")].map((img) => img.decode().catch(() => {})));
+    if (viewed === r) body.scrollTop = restore.scroll;
+  }
 }
+
+// Reopens the file that was open before a reload, if it belongs here.
+function restoreFile() {
+  const saved = savedFile();
+  if (saved?.file && saved.channel === current) return openFile(saved.file, saved);
+}
+
+let scrollSave;
+$("viewer-body").addEventListener("scroll", () => {
+  clearTimeout(scrollSave);
+  scrollSave = setTimeout(() => viewed && saveFile({ scroll: $("viewer-body").scrollTop }), 300);
+});
 
 // Shows the open file as highlighted source or, for markdown, rendered.
 function showFile(mode) {
@@ -505,6 +542,7 @@ function showFile(mode) {
   // Both are rendered and escaped by the server.
   $("viewer-body").innerHTML = preview ? `<div class="body preview">${r.preview}</div>` : r.html;
   for (const b of $("viewer-mode").children) b.classList.toggle("on", b.dataset.mode === (preview ? "preview" : "source"));
+  saveFile({ mode: preview ? "preview" : "source" });
   const target = !preview && r.line && $("viewer-body").querySelector(`#L${r.line}`);
   if (target) target.scrollIntoView({ block: "center" });
   else $("viewer-body").scrollTop = 0;
@@ -517,6 +555,7 @@ $("viewer-mode").onclick = (e) => {
 function closeFile() {
   viewing = null;
   viewed = null;
+  saveFile(null);
   $("viewer").hidden = true;
   document.body.classList.remove("viewing");
 }
@@ -683,7 +722,7 @@ document.addEventListener("keydown", (e) => {
 
 // ---------------------------------------------------------------- start
 
-refreshState().then(refreshFeed);
+refreshState().then(refreshFeed).then(restoreFile);
 setInterval(() => refreshState().catch(() => toast("server unreachable")), STATE_EVERY);
 setInterval(() => refreshFeed().catch(() => {}), FEED_EVERY);
 if (matchMedia("(min-width: 761px)").matches) $("input").focus(); // don't pop the phone keyboard
