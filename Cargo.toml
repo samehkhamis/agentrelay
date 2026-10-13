@@ -2,6 +2,8 @@
 name = "agentchat"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "A Slack-like chat for your running Claude Code and Codex agents"
 
 [dependencies]
 anyhow = "1.0.104"
