@@ -5,7 +5,9 @@ machine. Every live agent shows up in one place. You can read what each one is
 doing, message one agent or a whole channel, start new agents, and run shell
 commands for them, from a terminal UI or a web page that stay in sync.
 
-![The web UI: a DM with a Claude agent, a pasted image, subagent activity and file links](docs/screenshots/web-dm.png)
+<p align="center">
+  <img src="docs/screenshots/web-dm.png" alt="The web UI: a DM with a Claude agent, a pasted image, subagent activity and file links" width="720">
+</p>
 
 agentrelay doesn't install hooks, wrap your sessions or touch your settings. It
 finds the agents that are already running and talks to them over their own
@@ -24,8 +26,8 @@ local sockets.
 - **Clickable files.** Paths in tool calls and inline code open in a side panel
   with highlighting, at the right line. `/open` fuzzy-finds any file in the
   agent's folder.
-- **Markdown preview.** Markdown files open rendered, with their images and
-  links to other files. A Preview / Source switch at the top of the panel
+- **Markdown preview.** Markdown files open rendered, with their images (in
+  the TUI too) and links to other files. A Preview / Source switch at the top of the panel
   (`Alt+m` in the TUI) shows the highlighted source.
 - **Attachments.** Drag, drop or paste images and files into either UI. The
   agent gets their paths.
@@ -92,11 +94,16 @@ tailscale serve --bg 3000
 The server accepts tailnet requests only from your own Tailscale login (checked
 against `tailscaled`), so other people on a shared tailnet can't use it.
 
-![Phone UI](docs/screenshots/phone-dm.png) ![Phone drawer](docs/screenshots/phone-drawer.png)
+<p align="center">
+  <img src="docs/screenshots/phone-dm.png" alt="A DM on a phone" width="220">
+  <img src="docs/screenshots/phone-drawer.png" alt="The channel drawer on a phone" width="220">
+</p>
 
 ### Terminal UI
 
-![The TUI with an image, subagent activity and a file open in the side pane](docs/screenshots/tui.png)
+<p align="center">
+  <img src="docs/screenshots/tui.png" alt="The TUI with an image, subagent activity and a file open in the side pane" width="720">
+</p>
 
 | Keys | |
 |---|---|
@@ -134,14 +141,20 @@ These work in both UIs and autocomplete as you type.
 `slack` (default), `slack-light`, `dracula`, `nord`, `gruvbox`, `tokyo-night`,
 `catppuccin`, `solarized`. The syntax highlighting follows the theme.
 
-| | |
-|---|---|
-| ![slack-light](docs/screenshots/theme-light.png) | ![dracula](docs/screenshots/theme-dracula.png) |
-| ![gruvbox, with a file open](docs/screenshots/theme-gruvbox.png) | ![slack, the #all channel](docs/screenshots/web-all.png) |
+<p align="center">
+  <img src="docs/screenshots/theme-light.png" alt="slack-light" width="400">
+  <img src="docs/screenshots/theme-dracula.png" alt="dracula" width="400">
+  <br>
+  <img src="docs/screenshots/theme-gruvbox.png" alt="gruvbox, with a file open" width="400">
+  <img src="docs/screenshots/web-all.png" alt="slack, the #all channel" width="400">
+</p>
 
-![A file opened from a link, at the mentioned line](docs/screenshots/web-file.png)
+The file panel shows code at the mentioned line, and markdown rendered:
 
-![A markdown file previewed in the file panel](docs/screenshots/web-preview.png)
+<p align="center">
+  <img src="docs/screenshots/web-file.png" alt="A file opened from a link, at the mentioned line" width="400">
+  <img src="docs/screenshots/web-preview.png" alt="A markdown file previewed in the file panel" width="400">
+</p>
 
 ## How it works
 
