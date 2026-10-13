@@ -289,6 +289,21 @@ impl Hub {
         Some((mentions(p), text))
     }
 
+    /// `/open <query>`: the file itself if `query` names one, else the best
+    /// fuzzy match among the channel's folder's files.
+    pub fn open_query(&self, chan: &Channel, query: &str) -> Result<(FileRef, String)> {
+        if let Ok(opened) = self.open_file(chan, query) {
+            return Ok(opened);
+        }
+        let root = self
+            .default_folder(chan)
+            .ok_or_else(|| anyhow::anyhow!("/open works in a DM or project channel, which have a folder"))?;
+        let files = self.folder_files(&root);
+        let best = files::fuzzy(&files, query, 1).first().map(|f| f.to_string());
+        let best = best.ok_or_else(|| anyhow::anyhow!("no file matching {query}"))?;
+        self.open_file(chan, &best)
+    }
+
     /// Opens a file mentioned in a channel for viewing: inside one of its
     /// agents' folders, or one the feed mentions. Returns it with its line.
     pub fn open_file(&self, chan: &Channel, raw: &str) -> Result<(FileRef, String)> {
@@ -389,11 +404,21 @@ impl Hub {
     /// for `/new`, the channel's files only for `/open`).
     pub fn complete(&self, chan_id: &str, line: &str) -> Vec<Completion> {
         let folders = if line.starts_with("/new ") { self.folders() } else { Vec::new() };
-        let files = match (line.starts_with("/open "), self.channel(chan_id).and_then(|c| self.default_folder(c))) {
-            (true, Some(root)) => self.folder_files(&root),
+        let folder = self.channel(chan_id).and_then(|c| self.default_folder(c));
+        let files = match (line.starts_with("/open "), &folder) {
+            (true, Some(root)) => self.folder_files(root),
             _ => std::sync::Arc::default(),
         };
-        completions(line, &folders, &files)
+        let mut list = completions(line, &folders, &files);
+        if line.starts_with("/open ") && folder.is_none() {
+            list.push(Completion {
+                line: line.to_string(),
+                label: "no folder here".into(),
+                detail: "open files from a DM or project channel".into(),
+                run: false,
+            });
+        }
+        list
     }
 
     /// A folder's files, cached briefly so `/open` stays fast while typing.

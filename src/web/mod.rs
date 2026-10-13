@@ -432,7 +432,16 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
         Some(Input::Help) => return json!({ "note": hub::help() }),
         Some(Input::Theme(None)) => return json!({ "note": hub::theme_list() }),
         Some(Input::New { kind, folder, prompt }) => return start_agent(shared, channel, kind, folder.as_deref(), &prompt),
-        Some(Input::Open(file)) => return json!({ "open": file }),
+        Some(Input::Open(query)) => {
+            // Resolve a query (best fuzzy match) here; the page opens the path.
+            let hub = shared.hub.lock().unwrap();
+            let found = hub.channel(channel).map(|c| hub.open_query(c, &query));
+            return match found {
+                Some(Ok((f, _))) => json!({ "open": f.path }),
+                Some(Err(e)) => json!({ "note": e.to_string() }),
+                None => json!({ "note": "no channel" }),
+            };
+        }
         Some(Input::Rename(name)) => {
             let renamed = shared.hub.lock().unwrap().rename(channel, &name); // run outside the lock
             return match renamed {

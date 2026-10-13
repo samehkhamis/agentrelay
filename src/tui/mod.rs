@@ -274,7 +274,17 @@ impl App {
                 let task = self.hub.start_agent(&self.selected, kind, folder.as_deref(), &prompt);
                 self.background(task, format!("starting {}…", kind.as_str()));
             }
-            Some(Input::Open(file)) => self.open_file(&file),
+            Some(Input::Open(query)) => {
+                let opened = self.hub.channel(&self.selected).map(|c| self.hub.open_query(c, &query));
+                match opened {
+                    Some(Ok((file, text))) => {
+                        self.viewer = Some(viewer::Viewer::new(&file, &text));
+                        self.focus = Focus::File;
+                    }
+                    Some(Err(e)) => self.notify(e.to_string()),
+                    None => {}
+                }
+            }
             Some(Input::Rename(name)) => {
                 let renamed = self.hub.rename(&self.selected.clone(), &name);
                 let task = renamed.map(|(task, follow)| {
