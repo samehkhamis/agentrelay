@@ -22,7 +22,8 @@ usage:
   agentchat serve [--port N]     run the web UI in the foreground
   agentchat who                  list discovered agents
   agentchat send <agent> <text>  deliver a message to one agent over its socket
-  agentchat ping                 play the notification sound";
+  agentchat ping                 play the notification sound
+  agentchat doctor               show which image protocol this terminal gets, and why";
 
 fn main() -> Result<()> {
     sound::init_env();
@@ -59,6 +60,10 @@ fn main() -> Result<()> {
             println!("delivered to {}", agent.name);
             Ok(())
         }
+        Some("doctor") => {
+            doctor();
+            Ok(())
+        }
         Some("ping") => {
             sound::ping();
             std::thread::sleep(std::time::Duration::from_millis(1500));
@@ -79,5 +84,30 @@ fn port_arg(args: &[String]) -> Result<u16> {
             Some(p) => Ok(p),
             None => bail!("--port needs a port number"),
         },
+    }
+}
+
+/// Reports terminal image support, run in the terminal in question.
+fn doctor() {
+    ratatui::crossterm::terminal::enable_raw_mode().ok();
+    let images = tui::images::Images::detect();
+    ratatui::crossterm::terminal::disable_raw_mode().ok();
+    match images {
+        Some(im) => println!("{}", im.describe()),
+        None => println!("images: off (AGENTCHAT_IMAGES)"),
+    }
+    for k in ["AGENTCHAT_IMAGES", "TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "WEZTERM_PANE", "WEZTERM_EXECUTABLE", "TMUX", "WSL_DISTRO_NAME", "HERDR_ENV"] {
+        if let Ok(v) = std::env::var(k) {
+            println!("{k}={v}");
+        }
+    }
+    let wsl = std::fs::read_to_string("/proc/version").is_ok_and(|v| v.to_lowercase().contains("microsoft"));
+    let wezterm_mux = std::env::var("WEZTERM_PANE").is_ok();
+    if wsl && std::env::var("TERM_PROGRAM").is_ok_and(|t| t == "WezTerm") && !wezterm_mux {
+        println!(
+            "\nnote: WezTerm on Windows talks to WSL through ConPTY, which drops terminal replies and\n\
+             Kitty graphics. Connect through a WezTerm WSL or SSH domain (wezterm-mux-server in WSL)\n\
+             for Kitty images; otherwise half blocks are used."
+        );
     }
 }

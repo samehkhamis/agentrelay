@@ -6,7 +6,7 @@
 
 mod editor;
 mod feed;
-mod images;
+pub mod images;
 mod markdown;
 mod paste;
 mod view;
