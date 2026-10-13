@@ -110,7 +110,7 @@ impl Hub {
             seen: db::seen(&conn)?,
             last_id: msgs.last().map_or(0, |m| m.id),
             conn,
-            me: std::env::var("AGENTCHAT_USER").or_else(|_| std::env::var("USER")).unwrap_or_else(|_| "you".into()),
+            me: std::env::var("AGENTRELAY_USER").or_else(|_| std::env::var("USER")).unwrap_or_else(|_| "you".into()),
             msgs,
             agents: Vec::new(),
             channels: Vec::new(),

@@ -6,10 +6,10 @@ pub mod codex;
 use crate::agents::{Address, Agent};
 use std::path::PathBuf;
 
-const PREFIX: &str = "[agentchat] ";
+const PREFIX: &str = "[agentrelay] ";
 
-/// The text an agent receives: `[agentchat] alex in #webapp: …`, or
-/// `[agentchat] alex: …` for a DM, followed by any attached files' paths.
+/// The text an agent receives: `[agentrelay] alex in #webapp: …`, or
+/// `[agentrelay] alex: …` for a DM, followed by any attached files' paths.
 pub fn compose(from: &str, channel: Option<&str>, body: &str, files: &[PathBuf]) -> String {
     let mut text = match channel {
         Some(c) => format!("{PREFIX}{from} in #{c}: {body}"),

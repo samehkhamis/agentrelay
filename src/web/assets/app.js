@@ -1,4 +1,4 @@
-// The agentchat web client: polls the local server's JSON API and renders the
+// The agentrelay web client: polls the local server's JSON API and renders the
 // same channels, feeds and highlighting as the terminal UI.
 
 const $ = (id) => document.getElementById(id);
@@ -7,10 +7,10 @@ const FEED_EVERY = 1000;
 const TOAST_FOR = 4000;
 
 let state = { channels: [], statuses: {} };
-let current = localStorage.getItem("agentchat.channel") || "all";
+let current = localStorage.getItem("agentrelay.channel") || "all";
 let feedVersion = null;
 let awaiting = new Set();
-let sound = localStorage.getItem("agentchat.sound") !== "off";
+let sound = localStorage.getItem("agentrelay.sound") !== "off";
 let toastTimer = null;
 let pending = []; // uploaded files waiting to be sent: {id, name, image}
 let shell = false; // shell mode: "!" typed into an empty composer
@@ -20,7 +20,7 @@ const expanded = new Set(); // tool calls opened, by post key
 let suggestion = 0;
 
 function api(path, body) {
-  const init = { headers: { "X-Agentchat": "1", "Content-Type": "application/json" } };
+  const init = { headers: { "X-Agentrelay": "1", "Content-Type": "application/json" } };
   if (body !== undefined) Object.assign(init, { method: "POST", body: JSON.stringify(body) });
   return fetch(path, init).then((r) => r.json());
 }
@@ -103,7 +103,7 @@ function select(id) {
   if (id !== current) closeFile();
   if (id === current) return;
   current = id;
-  localStorage.setItem("agentchat.channel", id);
+  localStorage.setItem("agentrelay.channel", id);
   feedVersion = null;
   $("feed").replaceChildren();
   renderSidebar();
@@ -164,7 +164,7 @@ function renderHeader() {
   $("headline").textContent = c.headline || "";
   $("detail").textContent = c.detail;
   setPlaceholder();
-  document.title = `${c.title} · agentchat`;
+  document.title = `${c.title} · agentrelay`;
 }
 
 // ---------------------------------------------------------------- feed
@@ -296,7 +296,7 @@ async function submit() {
   autosize();
   if (text === "/sound") {
     sound = !sound;
-    localStorage.setItem("agentchat.sound", sound ? "on" : "off");
+    localStorage.setItem("agentrelay.sound", sound ? "on" : "off");
     toast(`sound ${sound ? "on" : "off"}`);
     ping();
     return;
@@ -316,7 +316,7 @@ async function submit() {
     if (r.theme) await refreshState();
     if (r.channel && r.channel !== current) {
       current = r.channel;
-      localStorage.setItem("agentchat.channel", current);
+      localStorage.setItem("agentrelay.channel", current);
     }
   }
   feedVersion = null;
@@ -330,7 +330,7 @@ async function upload(fileList) {
     toast(`uploading ${file.name}…`);
     const r = await fetch(`/api/upload?name=${encodeURIComponent(file.name || "pasted.png")}`, {
       method: "POST",
-      headers: { "X-Agentchat": "1" },
+      headers: { "X-Agentrelay": "1" },
       body: file,
     }).then((res) => res.json());
     if (r.error) toast(r.error);
@@ -553,16 +553,16 @@ function setWidth(name, px) {
   const p = PANELS[name];
   if (px == null) {
     document.documentElement.style.removeProperty(p.css);
-    localStorage.removeItem(`agentchat.${name}`);
+    localStorage.removeItem(`agentrelay.${name}`);
     return;
   }
   const w = Math.round(Math.max(p.min, Math.min(px, p.max())));
   document.documentElement.style.setProperty(p.css, `${w}px`);
-  localStorage.setItem(`agentchat.${name}`, w);
+  localStorage.setItem(`agentrelay.${name}`, w);
 }
 
 for (const name of Object.keys(PANELS)) {
-  const saved = Number(localStorage.getItem(`agentchat.${name}`));
+  const saved = Number(localStorage.getItem(`agentrelay.${name}`));
   if (saved) setWidth(name, saved);
 }
 

@@ -111,7 +111,7 @@ impl Hub {
 
     /// Runs a command for a DM's agent, like `!` in its own terminal. Codex
     /// runs it in the thread's shell and records it there; for Claude,
-    /// agentchat runs it in the agent's folder and sends the output to it.
+    /// agentrelay runs it in the agent's folder and sends the output to it.
     pub fn shell(&self, chan_id: &str, command: &str) -> Result<Task> {
         let agent = self.dm_agent(chan_id, "!command")?;
         let (command, me) = (command.to_string(), self.me.clone());

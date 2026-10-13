@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn previews_link_local_files_and_inline_images() {
-        let dir = std::env::temp_dir().join(format!("agentchat-preview-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("agentrelay-preview-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("docs")).unwrap();
         std::fs::write(dir.join("docs/guide.md"), "# hi").unwrap();
         std::fs::write(dir.join("docs/shot.png"), [0x89, b'P', b'N', b'G']).unwrap();

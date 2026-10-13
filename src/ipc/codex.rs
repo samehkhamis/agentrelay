@@ -23,7 +23,7 @@ impl AppServer {
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         let (ws, _) = tungstenite::client("ws://localhost/", stream).map_err(|e| anyhow!("websocket handshake: {e}"))?;
         let mut s = AppServer { ws, next_id: 1 };
-        s.call("initialize", json!({ "clientInfo": { "name": "agentchat", "version": env!("CARGO_PKG_VERSION") } }))?;
+        s.call("initialize", json!({ "clientInfo": { "name": "agentrelay", "version": env!("CARGO_PKG_VERSION") } }))?;
         s.send(json!({ "jsonrpc": "2.0", "method": "initialized" }))?;
         Ok(s)
     }

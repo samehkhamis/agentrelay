@@ -73,7 +73,7 @@ pub(super) fn parse(v: &Value, opts: Opts) -> Vec<Event> {
 }
 
 /// A `!command` run in the thread (`thread/shellCommand` or Codex's `!`),
-/// recorded as a `<user_shell_command>` block, in agentchat's report form.
+/// recorded as a `<user_shell_command>` block, in agentrelay's report form.
 fn shell_command(text: &str) -> Option<String> {
     let inner = text.strip_prefix("<user_shell_command>")?;
     let between = |open: &str, close: &str| inner.split_once(open).and_then(|(_, r)| r.split_once(close)).map(|(v, _)| v);

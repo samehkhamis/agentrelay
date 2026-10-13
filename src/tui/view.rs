@@ -66,7 +66,7 @@ impl App {
         let dim = Style::new().fg(theme::t().sidebar_dim);
         let online = self.hub.online();
         let mut rows: Vec<(Line, Option<&str>)> = vec![
-            (Line::styled(" agentchat", Style::new().fg(Color::White).bold()), None),
+            (Line::styled(" agentrelay", Style::new().fg(Color::White).bold()), None),
             (
                 Line::from(vec![
                     Span::styled(" ● ", Style::new().fg(theme::t().online)),

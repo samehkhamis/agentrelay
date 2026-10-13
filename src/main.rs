@@ -13,18 +13,18 @@ mod web;
 
 use anyhow::{bail, Result};
 
-const USAGE: &str = "agentchat — a Slack-style chat for your Claude Code and Codex agents
+const USAGE: &str = "agentrelay — a Slack-style chat for your Claude Code and Codex agents
 
 usage:
-  agentchat                      open the TUI
-  agentchat start [--port N]     run the web UI in the background (default port 3000);
+  agentrelay                      open the TUI
+  agentrelay start [--port N]     run the web UI in the background (default port 3000);
                                  reachable from your tailnet via `tailscale serve`
-  agentchat stop                 stop the background web UI
-  agentchat serve [--port N]     run the web UI in the foreground
-  agentchat who                  list discovered agents
-  agentchat send <agent> <text>  deliver a message to one agent over its socket
-  agentchat ping                 play the notification sound
-  agentchat doctor               show which image protocol this terminal gets, and why";
+  agentrelay stop                 stop the background web UI
+  agentrelay serve [--port N]     run the web UI in the foreground
+  agentrelay who                  list discovered agents
+  agentrelay send <agent> <text>  deliver a message to one agent over its socket
+  agentrelay ping                 play the notification sound
+  agentrelay doctor               show which image protocol this terminal gets, and why";
 
 fn main() -> Result<()> {
     sound::init_env();
@@ -33,13 +33,13 @@ fn main() -> Result<()> {
         None => tui::run(),
         Some("start") => {
             let port = web::start(port_arg(&args)?)?;
-            println!("agentchat is running at http://127.0.0.1:{port}");
+            println!("agentrelay is running at http://127.0.0.1:{port}");
             Ok(())
         }
         Some("stop") => {
             match web::stop()? {
-                true => println!("agentchat stopped"),
-                false => println!("agentchat isn't running"),
+                true => println!("agentrelay stopped"),
+                false => println!("agentrelay isn't running"),
             }
             Ok(())
         }

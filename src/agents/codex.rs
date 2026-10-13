@@ -17,7 +17,7 @@ struct Thread {
 
 pub fn list() -> Vec<Agent> {
     let loaded = ipc::codex::AppServer::connect().and_then(|mut c| c.loaded_threads()).unwrap_or_default();
-    let hours: i64 = std::env::var("AGENTCHAT_CODEX_HOURS").ok().and_then(|h| h.parse().ok()).unwrap_or(24);
+    let hours: i64 = std::env::var("AGENTRELAY_CODEX_HOURS").ok().and_then(|h| h.parse().ok()).unwrap_or(24);
     let since = chrono::Utc::now().timestamp() - hours * 3600;
     threads()
         .unwrap_or_default()

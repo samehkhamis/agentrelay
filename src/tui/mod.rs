@@ -703,9 +703,9 @@ pub fn doctor() {
     ratatui::crossterm::terminal::disable_raw_mode().ok();
     match images {
         Some(im) => println!("{}", im.describe()),
-        None => println!("images: off (AGENTCHAT_IMAGES)"),
+        None => println!("images: off (AGENTRELAY_IMAGES)"),
     }
-    for k in ["AGENTCHAT_IMAGES", "TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "WEZTERM_PANE", "WEZTERM_EXECUTABLE", "TMUX", "WSL_DISTRO_NAME", "HERDR_ENV"] {
+    for k in ["AGENTRELAY_IMAGES", "TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "WEZTERM_PANE", "WEZTERM_EXECUTABLE", "TMUX", "WSL_DISTRO_NAME", "HERDR_ENV"] {
         if let Ok(v) = std::env::var(k) {
             println!("{k}={v}");
         }

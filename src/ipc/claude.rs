@@ -21,7 +21,7 @@ fn read_json(p: &Path) -> Result<Value> {
 }
 
 pub fn send(pid: u32, text: &str) -> Result<()> {
-    let msg = json!({ "type": "user", "from": "agentchat", "message": { "role": "user", "content": envelope(text) } });
+    let msg = json!({ "type": "user", "from": "agentrelay", "message": { "role": "user", "content": envelope(text) } });
     write(pid, &msg)
 }
 
@@ -96,8 +96,8 @@ fn peer_token(dir: &Path, pid: u32) -> Result<String> {
 fn envelope(text: &str) -> String {
     // The receiver rejects an envelope whose body could close the tag early.
     let body = text.replace("</", "< /");
-    let mode = std::env::var("AGENTCHAT_FROM_MODE").unwrap_or_else(|_| "bypass".into());
-    format!("<{TAG} from-name=\"agentchat\" from-mode=\"{mode}\">\n{body}\n</{TAG}>")
+    let mode = std::env::var("AGENTRELAY_FROM_MODE").unwrap_or_else(|_| "bypass".into());
+    format!("<{TAG} from-name=\"agentrelay\" from-mode=\"{mode}\">\n{body}\n</{TAG}>")
 }
 
 /// Finds an envelope in received text (Claude may wrap it in a notice) and
@@ -121,6 +121,6 @@ mod tests {
     #[test]
     fn parses_envelopes_inside_notices() {
         let wrapped = format!("Another Claude session sent a message:\n{}\n\nThis came from…", envelope("hi there"));
-        assert_eq!(parse_envelope(&wrapped), Some((Some("agentchat".into()), "hi there")));
+        assert_eq!(parse_envelope(&wrapped), Some((Some("agentrelay".into()), "hi there")));
     }
 }

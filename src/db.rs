@@ -1,4 +1,4 @@
-//! Shared state in one SQLite file (WAL mode), so every agentchat process (the
+//! Shared state in one SQLite file (WAL mode), so every agentrelay process (the
 //! TUI, the web server) sees the same messages, read marks and agents.
 
 use anyhow::{Context, Result};
@@ -45,13 +45,13 @@ pub fn expand_tilde(path: &str) -> PathBuf {
 }
 
 pub fn db_path() -> PathBuf {
-    match std::env::var("AGENTCHAT_DB") {
+    match std::env::var("AGENTRELAY_DB") {
         Ok(p) if !p.is_empty() => PathBuf::from(p),
-        _ => home().join(".agentchat").join("chat.db"),
+        _ => home().join(".agentrelay").join("chat.db"),
     }
 }
 
-/// Where agentchat keeps its files: the database's directory.
+/// Where agentrelay keeps its files: the database's directory.
 pub fn data_dir() -> PathBuf {
     db_path().parent().map(PathBuf::from).unwrap_or_else(home)
 }

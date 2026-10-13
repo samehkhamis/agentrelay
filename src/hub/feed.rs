@@ -107,7 +107,7 @@ fn entry_post<'a>(e: &'a Entry, author: &'a str, kind: &'a str, me: &'a str, sub
     match &e.item {
         Item::Prompt { from, text, files } => {
             let author_kind = match from {
-                Some(f) if !f.ends_with("via agentchat") => "peer",
+                Some(f) if !f.ends_with("via agentrelay") => "peer",
                 _ => "user",
             };
             let body = Body::Markdown { text, clamp: Clamp::Off };

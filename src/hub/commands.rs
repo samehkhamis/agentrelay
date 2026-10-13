@@ -15,7 +15,7 @@ const COMMANDS: [(&str, &str, &str); 8] = [
     ("/open", "<file>", "open a file from this agent's folder"),
     ("/theme", "[name]", "switch the theme for every UI"),
     ("/sound", "", "turn the reply chime on or off"),
-    ("/quit", "", "leave agentchat"),
+    ("/quit", "", "leave agentrelay"),
     ("!", "<command>", "run it for a DM's agent (shell mode)"),
 ];
 

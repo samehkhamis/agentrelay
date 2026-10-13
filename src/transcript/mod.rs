@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 pub enum Item {
-    /// A prompt; `from` is set when it came through agentchat or another
+    /// A prompt; `from` is set when it came through agentrelay or another
     /// session; `files` are attached files and images (paths).
     Prompt { from: Option<String>, text: String, files: Vec<String> },
     Reply(String),
@@ -285,13 +285,13 @@ fn text_of(content: Option<&Value>, item_type: &str) -> String {
     }
 }
 
-/// A prompt entry, recognising messages sent through agentchat (and their
+/// A prompt entry, recognising messages sent through agentrelay (and their
 /// attached files) on top of any `files` the transcript carried inline.
 fn prompt(key: String, ts: i64, from: Option<String>, text: &str, mut files: Vec<String>) -> Event {
     let (from, text) = match crate::ipc::decompose(text) {
         Some(m) => {
             files.extend(m.files);
-            (Some(format!("{} · via agentchat", m.from)), m.body)
+            (Some(format!("{} · via agentrelay", m.from)), m.body)
         }
         None => (from, text),
     };

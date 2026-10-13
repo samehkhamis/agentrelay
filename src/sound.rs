@@ -2,7 +2,7 @@
 //! with rodio. On Linux it plays through cpal's `pulseaudio` host, a pure-Rust
 //! PulseAudio client (what reaches WSLg, whose ALSA has no pulse plugin);
 //! elsewhere through the default output (Core Audio on macOS).
-//! AGENTCHAT_SOUND=off silences it.
+//! AGENTRELAY_SOUND=off silences it.
 
 use rodio::source::SineWave;
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player, Source};
@@ -48,7 +48,7 @@ fn open_sink() -> Option<MixerDeviceSink> {
 }
 
 pub fn enabled_by_default() -> bool {
-    !matches!(std::env::var("AGENTCHAT_SOUND").as_deref(), Ok("off" | "0" | "false"))
+    !matches!(std::env::var("AGENTRELAY_SOUND").as_deref(), Ok("off" | "0" | "false"))
 }
 
 fn tone(freq: f32, ms: u64, delay_ms: u64) -> impl Source {

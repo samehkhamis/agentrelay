@@ -69,11 +69,11 @@ pub struct Agent {
 }
 
 /// All live agents, plus recent Codex threads as away, sorted by group.
-/// `AGENTCHAT_AGENTS=<file.json>` reads a fixed list instead (relative
+/// `AGENTRELAY_AGENTS=<file.json>` reads a fixed list instead (relative
 /// transcript paths resolve against the file, `~` in folders against $HOME),
 /// for demos and testing.
 pub fn discover() -> Vec<Agent> {
-    if let Ok(file) = std::env::var("AGENTCHAT_AGENTS") {
+    if let Ok(file) = std::env::var("AGENTRELAY_AGENTS") {
         return from_file(Path::new(&file));
     }
     let mut agents = claude::list();

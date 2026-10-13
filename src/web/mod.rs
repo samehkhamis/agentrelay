@@ -5,7 +5,7 @@
 //! 127.0.0.1 and only answers requests addressed to localhost (against DNS
 //! rebinding), or to this machine's tailnet name when `tailscale serve` says
 //! the requester is the machine's owner. Every
-//! API call must carry an `X-Agentchat` header, which other sites can't add to
+//! API call must carry an `X-Agentrelay` header, which other sites can't add to
 //! a cross-origin request without a CORS preflight this server never grants.
 //! `/files/<id>` serves only stored uploads.
 
@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server};
 
 pub const DEFAULT_PORT: u16 = 3000;
-const API_HEADER: &str = "X-Agentchat";
+const API_HEADER: &str = "X-Agentrelay";
 const POLL: Duration = Duration::from_millis(400);
 
 const INDEX: &str = include_str!("assets/index.html");
@@ -107,7 +107,7 @@ pub fn running() -> Option<u16> {
     call(port, "GET", "/api/ping").ok().map(|_| port)
 }
 
-/// Starts `agentchat serve` detached, and waits until it answers.
+/// Starts `agentrelay serve` detached, and waits until it answers.
 pub fn start(port: u16) -> Result<u16> {
     if let Some(p) = running() {
         return Ok(p);
@@ -158,7 +158,7 @@ fn call(port: u16, method: &str, path: &str) -> Result<String> {
     s.read_to_string(&mut out)?;
     match out.starts_with("HTTP/1.1 200") {
         true => Ok(out),
-        false => Err(anyhow!("unexpected response from agentchat server")),
+        false => Err(anyhow!("unexpected response from agentrelay server")),
     }
 }
 

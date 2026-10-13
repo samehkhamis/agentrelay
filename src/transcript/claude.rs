@@ -81,7 +81,7 @@ pub(super) fn parse(v: &Value, opts: Opts) -> Vec<Event> {
 }
 
 /// A user-side text: a typed prompt, a slash command, or a message from
-/// agentchat / another session (in a `<cross-session-message>` envelope, which
+/// agentrelay / another session (in a `<cross-session-message>` envelope, which
 /// Claude logs as a meta entry when it starts a turn). Other meta entries and
 /// harness wrappers are skipped.
 fn user_text(key: String, ts: i64, text: &str, meta: bool, files: Vec<String>) -> Option<Event> {

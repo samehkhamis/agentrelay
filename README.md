@@ -1,4 +1,4 @@
-# agentchat
+# agentrelay
 
 A Slack-style chat for the Claude Code and Codex CLI sessions running on your
 machine. Every live agent shows up in one place. You can read what each one is
@@ -7,7 +7,7 @@ commands for them, from a terminal UI or a web page that stay in sync.
 
 ![The web UI: a DM with a Claude agent, a pasted image, subagent activity and file links](docs/screenshots/web-dm.png)
 
-agentchat doesn't install hooks, wrap your sessions or touch your settings. It
+agentrelay doesn't install hooks, wrap your sessions or touch your settings. It
 finds the agents that are already running and talks to them over their own
 local sockets.
 
@@ -32,7 +32,7 @@ local sockets.
 - **Start agents** with `/new claude|codex [folder] [prompt]` or the **+**
   button. Rename the conversation with `/rename`.
 - **Shell mode.** Type `!` to run a command in the agent's folder. Codex runs
-  it in the agent's thread. For Claude, agentchat runs it and sends the output to
+  it in the agent's thread. For Claude, agentrelay runs it and sends the output to
   the agent.
 - **Presence**: busy, online and away, with unread badges and a chime when an
   agent replies.
@@ -45,12 +45,12 @@ local sockets.
 
 ## Install
 
-agentchat is a single Rust binary.
+agentrelay is a single Rust binary.
 
 ```sh
-git clone <this repo> && cd agentchat
+git clone <this repo> && cd agentrelay
 cargo build --release
-cp target/release/agentchat ~/.local/bin/   # or anywhere on your PATH
+cp target/release/agentrelay ~/.local/bin/   # or anywhere on your PATH
 ```
 
 It needs Rust 1.85 or newer (edition 2024). On Linux, the reply chime uses
@@ -60,26 +60,26 @@ default audio output.
 ## Usage
 
 ```
-agentchat                      open the TUI
-agentchat start [--port N]     run the web UI in the background (default port 3000)
-agentchat stop                 stop the background web UI
-agentchat serve [--port N]     run the web UI in the foreground
-agentchat who                  list discovered agents
-agentchat send <agent> <text>  deliver a message to one agent over its socket
-agentchat ping                 play the notification sound
-agentchat doctor               show which image protocol this terminal gets, and why
+agentrelay                      open the TUI
+agentrelay start [--port N]     run the web UI in the background (default port 3000)
+agentrelay stop                 stop the background web UI
+agentrelay serve [--port N]     run the web UI in the foreground
+agentrelay who                  list discovered agents
+agentrelay send <agent> <text>  deliver a message to one agent over its socket
+agentrelay ping                 play the notification sound
+agentrelay doctor               show which image protocol this terminal gets, and why
 ```
 
 ### Web UI
 
 ```sh
-agentchat start            # → http://127.0.0.1:3000
-agentchat start --port 8080
-agentchat stop
+agentrelay start            # → http://127.0.0.1:3000
+agentrelay start --port 8080
+agentrelay stop
 ```
 
 The server listens on **127.0.0.1 only**, on port **3000** by default. It runs
-in the background and keeps its state in `~/.agentchat`. The TUI and any number
+in the background and keeps its state in `~/.agentrelay`. The TUI and any number
 of browser tabs can be open at once. They share one database, so channels, read
 state, themes and messages stay in sync.
 
@@ -127,7 +127,7 @@ These work in both UIs and autocomplete as you type.
 | `/theme [name]` | switch the theme for every UI |
 | `/sound` | turn the reply chime on or off |
 | `!<command>` | run a shell command for this DM's agent |
-| `/quit` | leave agentchat |
+| `/quit` | leave agentrelay |
 
 ## Themes
 
@@ -146,7 +146,7 @@ These work in both UIs and autocomplete as you type.
 ## How it works
 
 **Claude Code.** Each interactive session writes `~/.claude/sessions/<pid>.json`
-with the path of its peer messaging socket, plus a token file. agentchat
+with the path of its peer messaging socket, plus a token file. agentrelay
 connects to the socket, authenticates with the token and sends a
 `cross-session-message`, the same envelope Claude sessions use to message each
 other. The envelope carries `from-mode="bypass"`, so sessions running with
@@ -154,7 +154,7 @@ bypassed permissions accept it without an approval prompt. Transcripts and
 subagent logs come from `~/.claude/projects/`.
 
 **Codex.** The Codex app-server listens on
-`~/.codex/app-server-control/app-server-control.sock`. agentchat speaks its
+`~/.codex/app-server-control/app-server-control.sock`. agentrelay speaks its
 JSON-RPC over a WebSocket on that socket to list loaded threads, start turns
 (with images), start threads, run shell commands and rename threads. Thread
 metadata comes from `~/.codex/state_*.sqlite` and transcripts from the rollout
@@ -163,7 +163,7 @@ files.
 **One model, two UIs.** A shared hub turns agents, transcripts and the
 message log into channels and posts. The TUI draws them with ratatui. The web
 server sends the same posts as HTML, rendered by the same markdown and syntect
-code. State lives in SQLite (WAL) at `~/.agentchat/chat.db`, so each process
+code. State lives in SQLite (WAL) at `~/.agentrelay/chat.db`, so each process
 sees what the others do.
 
 **New agents** run with `claude --bg --permission-mode bypassPermissions`, or as
@@ -180,19 +180,19 @@ start by hand to work unattended. The folder has to be trusted by Claude first.
 - The file panel opens only files inside an agent's folder or mentioned in the
   conversation. `/files/` serves only uploads.
 
-Anyone who can use agentchat can run commands as you through your agents, so
+Anyone who can use agentrelay can run commands as you through your agents, so
 treat it like a shell.
 
 ## Configuration
 
 | Variable | |
 |---|---|
-| `AGENTCHAT_USER` | your display name (default: `$USER`) |
-| `AGENTCHAT_DB` | database path (default: `~/.agentchat/chat.db`) |
-| `AGENTCHAT_SOUND=off` | silence the chime |
-| `AGENTCHAT_IMAGES` | force `kitty`, `sixel`, `iterm2`, `halfblocks` or `off` in the TUI |
-| `AGENTCHAT_CODEX_HOURS` | how far back to list idle Codex threads (default 24) |
-| `AGENTCHAT_AGENTS` | read agents from a JSON file instead of discovering them |
+| `AGENTRELAY_USER` | your display name (default: `$USER`) |
+| `AGENTRELAY_DB` | database path (default: `~/.agentrelay/chat.db`) |
+| `AGENTRELAY_SOUND=off` | silence the chime |
+| `AGENTRELAY_IMAGES` | force `kitty`, `sixel`, `iterm2`, `halfblocks` or `off` in the TUI |
+| `AGENTRELAY_CODEX_HOURS` | how far back to list idle Codex threads (default 24) |
+| `AGENTRELAY_AGENTS` | read agents from a JSON file instead of discovering them |
 
 ## Demo
 
@@ -200,14 +200,14 @@ The screenshots use made-up agents from [`demo/`](demo). To try it without
 touching your real sessions:
 
 ```sh
-HOME=$PWD/demo/home AGENTCHAT_AGENTS=$PWD/demo/agents.json \
-AGENTCHAT_DB=/tmp/agentchat-demo/chat.db AGENTCHAT_USER=alex \
-  target/release/agentchat serve --port 3901
+HOME=$PWD/demo/home AGENTRELAY_AGENTS=$PWD/demo/agents.json \
+AGENTRELAY_DB=/tmp/agentrelay-demo/chat.db AGENTRELAY_USER=alex \
+  target/release/agentrelay serve --port 3901
 ```
 
 ## Platforms
 
-agentchat is developed on Linux (including WSL). It should build on macOS,
+agentrelay is developed on Linux (including WSL). It should build on macOS,
 though that isn't tested regularly. Gemini CLI isn't supported because it has
 no IPC for a running session.
 

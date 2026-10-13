@@ -1,7 +1,7 @@
 //! Inline images in the terminal via ratatui-image: the Kitty graphics
 //! protocol where the terminal supports it, else Sixel or iTerm2, else
 //! colored half blocks. The protocol is detected once at startup by asking
-//! the terminal. `AGENTCHAT_IMAGES` overrides it: `kitty`, `sixel`, `iterm2`,
+//! the terminal. `AGENTRELAY_IMAGES` overrides it: `kitty`, `sixel`, `iterm2`,
 //! `halfblocks`, or `off` for plain `📎 name` lines.
 
 use ratatui::layout::Rect;
@@ -30,7 +30,7 @@ impl Images {
     /// Asks the terminal what it supports. Call after entering the alternate
     /// screen and before reading events. None if images are turned off.
     pub fn detect() -> Option<Images> {
-        let setting = std::env::var("AGENTCHAT_IMAGES").unwrap_or_default().to_ascii_lowercase();
+        let setting = std::env::var("AGENTRELAY_IMAGES").unwrap_or_default().to_ascii_lowercase();
         if setting == "off" || setting == "0" {
             return None;
         }
@@ -56,7 +56,7 @@ impl Images {
         Some(Images { picker, dims: HashMap::new(), ready: HashMap::new() })
     }
 
-    /// What was detected, for `agentchat doctor`.
+    /// What was detected, for `agentrelay doctor`.
     pub fn describe(&self) -> String {
         let font = self.picker.font_size();
         format!(
@@ -103,7 +103,7 @@ impl Images {
     }
 }
 
-/// WezTerm is the terminal agentchat talks to directly, not through a
+/// WezTerm is the terminal agentrelay talks to directly, not through a
 /// terminal multiplexer, which answers the query for itself.
 fn wezterm_outermost() -> bool {
     let nested = ["TMUX", "STY", "HERDR_ENV"].iter().any(|k| std::env::var_os(k).is_some());
