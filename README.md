@@ -94,10 +94,12 @@ tailscale serve --bg 3000
 The server accepts tailnet requests only from your own Tailscale login (checked
 against `tailscaled`), so other people on a shared tailnet can't use it.
 
-<p align="center">
-  <img src="docs/screenshots/phone-dm.png" alt="A DM on a phone" width="220">
-  <img src="docs/screenshots/phone-drawer.png" alt="The channel drawer on a phone" width="220">
-</p>
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/screenshots/phone-dm.png" alt="A DM on a phone" width="220"><br><sub>A DM</sub></td>
+    <td align="center"><img src="docs/screenshots/phone-drawer.png" alt="The channel drawer on a phone" width="220"><br><sub>The channel drawer</sub></td>
+  </tr>
+</table>
 
 ### Terminal UI
 
@@ -141,20 +143,25 @@ These work in both UIs and autocomplete as you type.
 `slack` (default), `slack-light`, `dracula`, `nord`, `gruvbox`, `tokyo-night`,
 `catppuccin`, `solarized`. The syntax highlighting follows the theme.
 
-<p align="center">
-  <img src="docs/screenshots/theme-light.png" alt="slack-light" width="400">
-  <img src="docs/screenshots/theme-dracula.png" alt="dracula" width="400">
-  <br>
-  <img src="docs/screenshots/theme-gruvbox.png" alt="gruvbox, with a file open" width="400">
-  <img src="docs/screenshots/web-all.png" alt="slack, the #all channel" width="400">
-</p>
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/screenshots/theme-light.png" alt="slack-light" width="400"><br><sub><code>slack-light</code></sub></td>
+    <td align="center"><img src="docs/screenshots/theme-dracula.png" alt="dracula" width="400"><br><sub><code>dracula</code></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/theme-gruvbox.png" alt="gruvbox, with a file open" width="400"><br><sub><code>gruvbox</code>, with a file open</sub></td>
+    <td align="center"><img src="docs/screenshots/web-all.png" alt="slack, the #all channel" width="400"><br><sub><code>slack</code>, the #all channel</sub></td>
+  </tr>
+</table>
 
 The file panel shows code at the mentioned line, and markdown rendered:
 
-<p align="center">
-  <img src="docs/screenshots/web-file.png" alt="A file opened from a link, at the mentioned line" width="400">
-  <img src="docs/screenshots/web-preview.png" alt="A markdown file previewed in the file panel" width="400">
-</p>
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/screenshots/web-file.png" alt="A file opened from a link, at the mentioned line" width="400"><br><sub>Code, at the mentioned line</sub></td>
+    <td align="center"><img src="docs/screenshots/web-preview.png" alt="A markdown file previewed in the file panel" width="400"><br><sub>Markdown, rendered</sub></td>
+  </tr>
+</table>
 
 ## How it works
 
