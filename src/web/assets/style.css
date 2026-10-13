@@ -137,6 +137,14 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
 .post { padding: 2px 20px; }
 .post:hover { background: var(--hover); }
 .post.first { margin-top: 10px; padding-top: 6px; }
+/* Subagent activity: a colored bar and a faint tint, so it reads apart from the agent's own. */
+.post.sub {
+  margin-left: 20px;
+  padding-left: 12px;
+  border-left: 3px solid var(--subagent);
+  background: color-mix(in srgb, var(--subagent) 7%, transparent);
+}
+.post.sub:hover { background: color-mix(in srgb, var(--subagent) 12%, transparent); }
 .post-head { display: flex; align-items: baseline; gap: 8px; }
 .author { font-weight: 900; }
 .meta { color: var(--muted); font-size: 12px; }

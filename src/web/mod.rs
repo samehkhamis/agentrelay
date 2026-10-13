@@ -307,6 +307,7 @@ fn feed(shared: &Shared, channel: &str, v: Option<&str>) -> Value {
                 "new_group": p.new_group,
                 "author": p.author,
                 "kind": p.author_kind,
+                "subagent": p.is_subagent(),
                 "tag": p.tag,
                 "time": feed::clock(p.ts),
                 "note": p.note,

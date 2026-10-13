@@ -23,7 +23,7 @@ impl Cache {
 }
 
 pub fn layout(posts: &[Post], width: usize, cache: &mut Cache) -> Vec<Line<'static>> {
-    let body_width = width.saturating_sub(2).max(16);
+    let body_width = width.saturating_sub(3).max(16);
     let mut lines = Vec::new();
     for p in posts {
         if p.new_day {
@@ -32,13 +32,13 @@ pub fn layout(posts: &[Post], width: usize, cache: &mut Cache) -> Vec<Line<'stat
         }
         if p.new_group {
             lines.push(Line::default());
-            lines.push(header(p));
+            lines.push(gutter(p, header(p)));
         }
         let body = cache.get(&p.key, body_width, || render_body(&p.body, body_width));
-        lines.extend(body.iter().map(|l| indent(l.clone())));
+        lines.extend(body.iter().map(|l| gutter(p, l.clone())));
         for f in &p.files {
             let name = uploads::display_name(std::path::Path::new(f));
-            lines.push(indent(Line::styled(format!("📎 {name}"), Style::new().fg(theme::LINK))));
+            lines.push(gutter(p, Line::styled(format!("📎 {name}"), Style::new().fg(theme::LINK))));
         }
     }
     lines
@@ -56,10 +56,11 @@ fn day_divider(label: &str, width: usize) -> Line<'static> {
 
 fn header(p: &Post) -> Line<'static> {
     let dim = Style::new().fg(theme::DIM);
-    let mut spans = vec![
-        Span::raw(" "),
-        Span::styled(p.author.to_string(), Style::new().fg(theme::kind_color(p.author_kind)).bold()),
-    ];
+    let arrow = if p.is_subagent() { "↳ " } else { "" };
+    let mut spans = vec![Span::styled(
+        format!("{arrow}{}", p.author),
+        Style::new().fg(theme::kind_color(p.author_kind)).bold(),
+    )];
     if let Some(tag) = p.tag {
         spans.push(Span::styled(format!("  {tag}"), dim));
     }
@@ -70,8 +71,11 @@ fn header(p: &Post) -> Line<'static> {
     Line::from(spans)
 }
 
-fn indent(mut l: Line<'static>) -> Line<'static> {
-    l.spans.insert(0, Span::raw(" "));
+/// The left margin: a colored bar for subagent activity, so it stands apart
+/// from the agent's own.
+fn gutter(p: &Post, mut l: Line<'static>) -> Line<'static> {
+    let mark = if p.is_subagent() { Span::styled("▍ ", Style::new().fg(theme::SUBAGENT)) } else { Span::raw("  ") };
+    l.spans.insert(0, mark);
     l
 }
 

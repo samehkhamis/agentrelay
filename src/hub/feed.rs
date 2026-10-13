@@ -113,6 +113,13 @@ fn entry_post<'a>(e: &'a Entry, author: &'a str, kind: &'a str, me: &'a str, sub
     }
 }
 
+impl Post<'_> {
+    /// Activity from one of the agent's subagents rather than the agent itself.
+    pub fn is_subagent(&self) -> bool {
+        self.author_kind == "subagent"
+    }
+}
+
 fn post<'a>(
     key: String,
     ts: i64,

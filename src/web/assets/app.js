@@ -175,10 +175,10 @@ function renderFeed(posts) {
 function renderPost(p) {
   const out = [];
   if (p.new_day) out.push(el("div", "day", p.day));
-  const post = el("div", `post${p.new_group ? " first" : ""}`);
+  const post = el("div", `post${p.new_group ? " first" : ""}${p.subagent ? " sub" : ""}`);
   if (p.new_group) {
     const head = el("div", "post-head");
-    head.append(el("span", `author k-${p.kind}`, p.author));
+    head.append(el("span", `author k-${p.kind}`, p.subagent ? `↳ ${p.author}` : p.author));
     if (p.tag) head.append(el("span", "meta", p.tag));
     head.append(el("span", "meta", p.time));
     if (p.note) head.append(el("span", "note", p.note));
