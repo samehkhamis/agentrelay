@@ -20,6 +20,13 @@ impl Editor {
         std::mem::take(&mut self.text)
     }
 
+    /// Inserts text at the cursor.
+    pub fn insert(&mut self, text: &str) {
+        let at = self.byte_at(self.cursor);
+        self.text.insert_str(at, text);
+        self.cursor += text.chars().count();
+    }
+
     fn byte_at(&self, char_idx: usize) -> usize {
         self.text.char_indices().nth(char_idx).map_or(self.text.len(), |(b, _)| b)
     }

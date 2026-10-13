@@ -1,23 +1,28 @@
 //! The terminal UI: UI-only state (selection, scroll, composer, notices) over
 //! the shared [`Hub`]. Drawing lives in `view`.
+//!
+//! Dragging files onto the terminal pastes their paths; a paste made only of
+//! existing file paths attaches those files instead of inserting text.
 
 mod editor;
 mod feed;
 mod markdown;
+mod paste;
 mod view;
 
 use crate::hub::{self, Hub, Input};
-use crate::sound;
+use crate::{sound, uploads};
 use anyhow::Result;
 use editor::Editor;
 use hub::channels::Channel;
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton,
-    MouseEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode,
+    KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 use ratatui::crossterm::execute;
 use ratatui::layout::{Position, Rect};
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -31,6 +36,8 @@ pub struct App {
     /// Id of the open channel.
     selected: String,
     editor: Editor,
+    /// Files to attach to the next message.
+    pending: Vec<PathBuf>,
     /// Lines scrolled up from the bottom of the feed.
     scroll: usize,
     feed_height: usize,
@@ -51,9 +58,9 @@ pub struct App {
 pub fn run() -> Result<()> {
     let mut app = App::new()?;
     let mut terminal = ratatui::init();
-    execute!(std::io::stdout(), EnableMouseCapture)?;
+    execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
     let res = app.event_loop(&mut terminal);
-    let _ = execute!(std::io::stdout(), DisableMouseCapture);
+    let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     res
 }
@@ -65,6 +72,7 @@ impl App {
             hub: Hub::open()?,
             selected: "all".into(),
             editor: Editor::default(),
+            pending: Vec::new(),
             scroll: 0,
             feed_height: 10,
             sidebar_area: Rect::default(),
@@ -88,6 +96,7 @@ impl App {
                 match event::read()? {
                     Event::Key(k) if k.kind != KeyEventKind::Release => self.on_key(k)?,
                     Event::Mouse(m) => self.on_mouse(m.kind, m.column, m.row),
+                    Event::Paste(text) => self.on_paste(&text),
                     _ => {}
                 }
             }
@@ -151,7 +160,9 @@ impl App {
 
     fn submit(&mut self) -> Result<()> {
         match hub::parse_input(&self.editor.take()) {
-            None => {}
+            None if self.pending.is_empty() => {}
+            None => self.send(String::new())?,
+            Some(Input::Send(body)) => self.send(body)?,
             Some(Input::Quit) => self.quit = true,
             Some(Input::Help) => self.notify(hub::HELP),
             Some(Input::ToggleSound) => {
@@ -161,21 +172,41 @@ impl App {
                     sound::ping();
                 }
             }
-            Some(Input::Send(body)) => {
-                self.scroll = 0;
-                match self.hub.send(&self.selected.clone(), &body)? {
-                    None => self.notify("nobody online here to deliver to"),
-                    Some(delivery) => {
-                        self.notify(format!("delivering to {}…", delivery.targets.len()));
-                        let tx = self.sent_tx.clone();
-                        std::thread::spawn(move || {
-                            let _ = tx.send(delivery.run());
-                        });
-                    }
-                }
+        }
+        Ok(())
+    }
+
+    /// Logs the message with any pending files and delivers it in the background.
+    fn send(&mut self, body: String) -> Result<()> {
+        let files = match self.pending.drain(..).map(|p| uploads::import(&p)).collect::<Result<Vec<_>>>() {
+            Ok(files) => files,
+            Err(e) => {
+                self.notify(format!("couldn't attach: {e}"));
+                return Ok(());
+            }
+        };
+        self.scroll = 0;
+        match self.hub.send(&self.selected.clone(), &body, &files)? {
+            None => self.notify("nobody online here to deliver to"),
+            Some(delivery) => {
+                self.notify(format!("delivering to {}…", delivery.targets.len()));
+                let tx = self.sent_tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(delivery.run());
+                });
             }
         }
         Ok(())
+    }
+
+    fn on_paste(&mut self, text: &str) {
+        match paste::files(text) {
+            Some(files) => {
+                self.notify(format!("attached {} file(s) · Backspace removes", files.len()));
+                self.pending.extend(files);
+            }
+            None => self.editor.insert(&text.replace(['\r', '\n'], " ")),
+        }
     }
 
     fn on_key(&mut self, k: KeyEvent) -> Result<()> {
@@ -196,6 +227,9 @@ impl App {
             KeyCode::Down if self.editor.is_empty() => self.scroll = self.scroll.saturating_sub(3),
             KeyCode::Esc => self.scroll = 0,
             KeyCode::Enter => self.submit()?,
+            KeyCode::Backspace if self.editor.is_empty() && !self.pending.is_empty() => {
+                self.pending.pop();
+            }
             _ => {
                 self.editor.handle(k);
             }

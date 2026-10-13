@@ -3,7 +3,7 @@
 use super::{feed, App};
 use crate::agents::{Kind, Presence};
 use crate::hub::channels::{Channel, Section};
-use crate::theme;
+use crate::{theme, uploads};
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
@@ -181,7 +181,12 @@ impl App {
     // ------------------------------------------------------------ composer
 
     fn draw_composer(&self, f: &mut Frame, area: Rect) {
-        let block = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(theme::DIM));
+        let mut block = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(theme::DIM));
+        if !self.pending.is_empty() {
+            let names: Vec<String> = self.pending.iter().map(|p| uploads::display_name(p)).collect();
+            let title = format!(" 📎 {} ", names.join("  "));
+            block = block.title(Span::styled(title, Style::new().fg(theme::LINK)));
+        }
         let inner = block.inner(area);
         let (shown, cursor) = self.editor.view(inner.width as usize);
         let para = if self.editor.is_empty() {

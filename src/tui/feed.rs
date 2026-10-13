@@ -2,7 +2,7 @@
 
 use super::markdown;
 use crate::hub::feed::{self, Body, Post};
-use crate::theme;
+use crate::{theme, uploads};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use std::collections::HashMap;
@@ -36,6 +36,10 @@ pub fn layout(posts: &[Post], width: usize, cache: &mut Cache) -> Vec<Line<'stat
         }
         let body = cache.get(&p.key, body_width, || render_body(&p.body, body_width));
         lines.extend(body.iter().map(|l| indent(l.clone())));
+        for f in p.files {
+            let name = uploads::display_name(std::path::Path::new(f));
+            lines.push(indent(Line::styled(format!("📎 {name}"), Style::new().fg(theme::LINK))));
+        }
     }
     lines
 }
