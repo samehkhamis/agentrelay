@@ -75,10 +75,17 @@ impl Shared {
 
 /// Runs the server in the foreground until `/api/stop`.
 pub fn serve(port: u16) -> Result<()> {
+    db::create_private_dir(&db::data_dir())?;
+    // Held until this process exits, however it exits; see `live`.
+    let mut info = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(info_path())?;
+    if info.try_lock().is_err() {
+        return Err(anyhow!("agentrelay is already running"));
+    }
     let server = Server::http(("127.0.0.1", port)).map_err(|e| anyhow!("listening on 127.0.0.1:{port}: {e}"))?;
     let hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
     let shared = Arc::new(Shared { hub: Mutex::new(Hub::open()?), html: Mutex::default(), hosts, tailnet: Mutex::default() });
-    std::fs::write(info_path(), json!({ "pid": std::process::id(), "port": port }).to_string())?;
+    info.set_len(0)?;
+    info.write_all(json!({ "pid": std::process::id(), "port": port }).to_string().as_bytes())?;
 
     let poller = shared.clone();
     std::thread::spawn(move || loop {
@@ -100,56 +107,95 @@ fn info_path() -> PathBuf {
     db::data_dir().join("server.json")
 }
 
-/// The port of a running server, if one answers.
-fn running() -> Option<u16> {
+/// The pid and port of a live server. A server holds a lock on its info
+/// file until it exits, so a file left by a dead one (or a reused pid) can't
+/// pass for a live server.
+fn live() -> Option<(i32, u16)> {
+    let file = std::fs::File::open(info_path()).ok()?;
+    if file.try_lock_shared().is_ok() {
+        return None;
+    }
     let info: Value = serde_json::from_str(&std::fs::read_to_string(info_path()).ok()?).ok()?;
-    let port = info.get("port")?.as_u64()? as u16;
-    call(port, "GET", "/api/ping").ok().map(|_| port)
+    Some((info.get("pid")?.as_i64()? as i32, info.get("port")?.as_u64()? as u16))
 }
 
-/// Starts `agentrelay serve` detached, and waits until it answers.
+fn answers(port: u16) -> bool {
+    call(port, "GET", "/api/ping").is_ok()
+}
+
+/// Starts `agentrelay serve` detached, and waits until it answers. A server
+/// that's running but not answering is stopped and replaced.
 pub fn start(port: u16) -> Result<u16> {
-    if let Some(p) = running() {
-        return Ok(p);
+    match live() {
+        Some((_, p)) if answers(p) => return Ok(p),
+        Some(_) => {
+            stop()?;
+        }
+        None => {}
     }
     use std::os::unix::process::CommandExt;
     db::create_private_dir(&db::data_dir())?;
-    let log = std::fs::File::create(db::data_dir().join("server.log"))?;
-    std::process::Command::new(std::env::current_exe()?)
+    let log_path = db::data_dir().join("server.log");
+    let log = std::fs::File::create(&log_path)?;
+    let mut child = std::process::Command::new(std::env::current_exe()?)
         .args(["serve", "--port", &port.to_string()])
         .stdin(std::process::Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log)
         .process_group(0)
         .spawn()?;
-    for _ in 0..50 {
-        if let Some(p) = running() {
+    for _ in 0..100 {
+        if let Some((_, p)) = live()
+            && answers(p)
+        {
             return Ok(p);
         }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    Err(anyhow!("server didn't start; see {}", db::data_dir().join("server.log").display()))
-}
-
-/// Asks a running server to exit. False if none was running.
-pub fn stop() -> Result<bool> {
-    let Some(port) = running() else { return Ok(false) };
-    call(port, "POST", "/api/stop")?;
-    let _ = std::fs::remove_file(info_path());
-    // Wait for the port to free up, so an immediate `start` can bind it.
-    for _ in 0..50 {
-        if TcpStream::connect(("127.0.0.1", port)).is_err() {
-            break;
+        if child.try_wait()?.is_some() {
+            let why = std::fs::read_to_string(&log_path).unwrap_or_default();
+            return Err(anyhow!("server didn't start: {}", why.trim()));
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    Ok(true)
+    Err(anyhow!("server didn't answer; see {}", log_path.display()))
+}
+
+/// Stops a live server: asks it to exit, then signals it if it doesn't.
+/// False if none was running.
+pub fn stop() -> Result<bool> {
+    use rustix::process::{kill_process, Pid, Signal};
+    let Some((pid, port)) = live() else { return Ok(false) };
+    let _ = call(port, "POST", "/api/stop");
+    if exits_soon() {
+        return Ok(true);
+    }
+    let pid = Pid::from_raw(pid).ok_or_else(|| anyhow!("bad pid {pid} in {}", info_path().display()))?;
+    for sig in [Signal::Term, Signal::Kill] {
+        let _ = kill_process(pid, sig);
+        if exits_soon() {
+            return Ok(true);
+        }
+    }
+    Err(anyhow!("couldn't stop the server (pid {})", pid.as_raw_nonzero()))
+}
+
+/// Whether the server exits within 3 seconds.
+fn exits_soon() -> bool {
+    for _ in 0..30 {
+        if live().is_none() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    false
 }
 
 /// A minimal local HTTP request, enough for ping and stop.
 fn call(port: u16, method: &str, path: &str) -> Result<String> {
-    let mut s = TcpStream::connect(("127.0.0.1", port))?;
+    // Timeouts throughout: some networks (WSL's mirrored mode) leave a
+    // connect to a closed local port hanging instead of refusing it.
+    let mut s = TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_secs(1))?;
     s.set_read_timeout(Some(Duration::from_secs(2)))?;
+    s.set_write_timeout(Some(Duration::from_secs(2)))?;
     write!(
         s,
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{API_HEADER}: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
