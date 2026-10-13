@@ -33,6 +33,8 @@ pub struct Post<'a> {
     /// Shown dim after the time, e.g. [`STATUS_NOTE`].
     pub note: Option<&'static str>,
     pub body: Body<'a>,
+    /// Attached files (paths in the uploads directory).
+    pub files: &'a [String],
     /// First post of its day: draw a day divider above it.
     pub new_day: bool,
     /// Starts an author group: draw the author header above it.
@@ -46,7 +48,7 @@ pub fn log_posts<'a>(msgs: &'a [Msg], chan: &Channel) -> Vec<Post<'a>> {
     visible.sort_by_key(|m| (m.ts, m.id));
     let posts = visible[visible.len().saturating_sub(LIMIT)..].iter().map(|m| {
         let status = m.kind == "status";
-        post(
+        let mut p = post(
             format!("m{}", m.id),
             m.ts,
             &m.sender,
@@ -54,7 +56,9 @@ pub fn log_posts<'a>(msgs: &'a [Msg], chan: &Channel) -> Vec<Post<'a>> {
             (m.sender_kind != "user").then_some(m.sender_kind.as_str()),
             status.then_some(STATUS_NOTE),
             Body::Markdown { text: &m.body, clamp: status },
-        )
+        );
+        p.files = &m.files;
+        p
     });
     arrange(posts.collect())
 }
@@ -90,7 +94,7 @@ fn post<'a>(
     note: Option<&'static str>,
     body: Body<'a>,
 ) -> Post<'a> {
-    Post { key, ts, author, author_kind, tag, note, body, new_day: false, new_group: false }
+    Post { key, ts, author, author_kind, tag, note, body, files: &[], new_day: false, new_group: false }
 }
 
 /// Sets the day and group breaks: a header for each author run, broken by

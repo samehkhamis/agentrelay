@@ -10,11 +10,13 @@ use crate::agents::{Agent, Kind, Presence};
 use crate::db::{self, Msg};
 use crate::ipc;
 use crate::transcript::Tail;
+use crate::uploads;
 use anyhow::Result;
 use channels::{Channel, Section};
 use feed::Post;
 use rusqlite::Connection;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
 const HISTORY: i64 = 3000;
@@ -45,12 +47,13 @@ pub fn parse_input(text: &str) -> Option<Input> {
 pub struct Delivery {
     pub targets: Vec<Agent>,
     text: String,
+    images: Vec<PathBuf>,
 }
 
 impl Delivery {
     /// (delivered, failed) agent names.
     pub fn run(&self) -> (Vec<String>, Vec<String>) {
-        ipc::deliver(&self.targets, &self.text)
+        ipc::deliver(&self.targets, &self.text, &self.images)
     }
 }
 
@@ -217,16 +220,18 @@ impl Hub {
         )
     }
 
-    /// Logs a message in a channel and returns its delivery to everyone live
-    /// there (None if nobody is).
-    pub fn send(&mut self, chan_id: &str, body: &str) -> Result<Option<Delivery>> {
+    /// Logs a message (and files already in the uploads directory) in a
+    /// channel and returns its delivery to everyone live there (None if nobody is).
+    pub fn send(&mut self, chan_id: &str, body: &str, files: &[PathBuf]) -> Result<Option<Delivery>> {
         let Some(chan) = self.channel(chan_id).cloned() else { return Ok(None) };
-        db::post(&self.conn, &chan.id, &self.me, "user", "chat", body, db::now_ms())?;
+        let paths: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+        db::post(&self.conn, &chan.id, &self.me, body, &paths)?;
         let targets: Vec<Agent> =
             self.members(&chan).into_iter().filter(|a| a.presence != Presence::Away).cloned().collect();
         let channel = (chan.section != Section::Direct).then(|| chan.name().to_string());
-        let text = ipc::compose(&self.me, channel.as_deref(), body);
+        let text = ipc::compose(&self.me, channel.as_deref(), body, files);
+        let images = files.iter().filter(|f| uploads::is_image(f)).cloned().collect();
         self.poll()?;
-        Ok((!targets.is_empty()).then_some(Delivery { targets, text }))
+        Ok((!targets.is_empty()).then_some(Delivery { targets, text, images }))
     }
 }

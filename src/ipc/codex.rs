@@ -6,6 +6,7 @@ use crate::db::home;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::time::Duration;
 use tungstenite::{Message, WebSocket};
 
@@ -58,8 +59,10 @@ impl AppServer {
             .unwrap_or_default())
     }
 
-    pub fn start_turn(&mut self, thread: &str, text: &str) -> Result<()> {
-        self.call("turn/start", json!({ "threadId": thread, "input": [{ "type": "text", "text": text }] }))?;
+    pub fn start_turn(&mut self, thread: &str, text: &str, images: &[PathBuf]) -> Result<()> {
+        let mut input = vec![json!({ "type": "text", "text": text })];
+        input.extend(images.iter().map(|p| json!({ "type": "localImage", "path": p })));
+        self.call("turn/start", json!({ "threadId": thread, "input": input }))?;
         Ok(())
     }
 }

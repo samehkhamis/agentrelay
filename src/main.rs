@@ -7,6 +7,7 @@ mod sound;
 mod theme;
 mod transcript;
 mod tui;
+mod uploads;
 mod web;
 
 use anyhow::{bail, Result};
@@ -15,7 +16,7 @@ const USAGE: &str = "agentchat — a Slack-style chat for your Claude Code and C
 
 usage:
   agentchat                      open the TUI
-  agentchat start [--port N]     run the web UI in the background (default port 7878)
+  agentchat start [--port N]     run the web UI in the background (default port 3000)
   agentchat stop                 stop the background web UI
   agentchat serve [--port N]     run the web UI in the foreground
   agentchat who                  list discovered agents
@@ -50,7 +51,7 @@ fn main() -> Result<()> {
             let Some(agent) = agents::discover().into_iter().find(|a| a.name == args[1]) else {
                 bail!("no agent named {}", args[1]);
             };
-            let (_, failed) = ipc::deliver(std::slice::from_ref(&agent), &args[2..].join(" "));
+            let (_, failed) = ipc::deliver(std::slice::from_ref(&agent), &args[2..].join(" "), &[]);
             if !failed.is_empty() {
                 bail!("delivery to {} failed", agent.name);
             }

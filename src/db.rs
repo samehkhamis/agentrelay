@@ -19,6 +19,8 @@ pub struct Msg {
     /// `chat` for posted messages, `status` for an agent's latest transcript reply.
     pub kind: String,
     pub body: String,
+    /// Attached files (paths in the uploads directory).
+    pub files: Vec<String>,
 }
 
 pub fn home() -> PathBuf {
@@ -63,6 +65,11 @@ pub fn open() -> Result<Connection> {
         CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY CHECK (id = 1), pid INTEGER NOT NULL,
                                            ts INTEGER NOT NULL, json TEXT NOT NULL);",
     )?;
+    // Attachments came later: one path per line.
+    let has_files = conn.prepare("SELECT files FROM messages LIMIT 0").is_ok();
+    if !has_files {
+        conn.execute_batch("ALTER TABLE messages ADD COLUMN files TEXT NOT NULL DEFAULT ''")?;
+    }
     Ok(conn)
 }
 
@@ -70,18 +77,12 @@ pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-pub fn post(
-    conn: &Connection,
-    channel: &str,
-    sender: &str,
-    sender_kind: &str,
-    kind: &str,
-    body: &str,
-    ts: i64,
-) -> Result<i64> {
+/// Logs a message from the user.
+pub fn post(conn: &Connection, channel: &str, sender: &str, body: &str, files: &[String]) -> Result<i64> {
     conn.execute(
-        "INSERT INTO messages (ts, channel, sender, sender_kind, kind, body) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![ts, channel, sender, sender_kind, kind, body],
+        "INSERT INTO messages (ts, channel, sender, sender_kind, kind, body, files)
+         VALUES (?1, ?2, ?3, 'user', 'chat', ?4, ?5)",
+        params![now_ms(), channel, sender, body, files.join("\n")],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -95,13 +96,14 @@ fn row_to_msg(r: &rusqlite::Row) -> rusqlite::Result<Msg> {
         sender_kind: r.get(4)?,
         kind: r.get(5)?,
         body: r.get(6)?,
+        files: r.get::<_, String>(7)?.lines().map(str::to_string).collect(),
     })
 }
 
 /// Messages with id > `after`, oldest first.
 pub fn since(conn: &Connection, after: i64) -> Result<Vec<Msg>> {
     let mut st = conn.prepare(
-        "SELECT id, ts, channel, sender, sender_kind, kind, body FROM messages WHERE id > ?1 ORDER BY id",
+        "SELECT id, ts, channel, sender, sender_kind, kind, body, files FROM messages WHERE id > ?1 ORDER BY id",
     )?;
     let rows = st.query_map([after], row_to_msg)?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -110,7 +112,7 @@ pub fn since(conn: &Connection, after: i64) -> Result<Vec<Msg>> {
 /// The most recent `limit` messages, oldest first.
 pub fn tail(conn: &Connection, limit: i64) -> Result<Vec<Msg>> {
     let mut st = conn.prepare(
-        "SELECT id, ts, channel, sender, sender_kind, kind, body FROM
+        "SELECT id, ts, channel, sender, sender_kind, kind, body, files FROM
            (SELECT * FROM messages ORDER BY id DESC LIMIT ?1) ORDER BY id",
     )?;
     let rows = st.query_map([limit], row_to_msg)?;
