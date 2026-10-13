@@ -6,6 +6,7 @@
 
 mod editor;
 mod feed;
+mod images;
 mod markdown;
 mod paste;
 mod view;
@@ -50,6 +51,8 @@ pub struct App {
     /// Agents messaged that haven't replied since; their next reply pings.
     awaiting: HashSet<String>,
     cache: feed::Cache,
+    /// Inline images; None when turned off.
+    images: Option<images::Images>,
     /// The theme the cache was rendered in.
     cache_theme: &'static str,
     sent_tx: Sender<Sent>,
@@ -60,6 +63,7 @@ pub struct App {
 pub fn run() -> Result<()> {
     let mut app = App::new()?;
     let mut terminal = ratatui::init();
+    app.images = images::Images::detect(); // queries the terminal, so after init
     execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste)?;
     let res = app.event_loop(&mut terminal);
     let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste);
@@ -84,6 +88,7 @@ impl App {
             sound: sound::enabled_by_default(),
             awaiting: HashSet::new(),
             cache: feed::Cache::default(),
+            images: None,
             cache_theme: theme::t().name,
             sent_tx,
             sent_rx,
@@ -123,7 +128,8 @@ impl App {
         let was_empty = self.hub.agents.is_empty();
         let replied = self.hub.poll()?;
         if was_empty && !self.hub.agents.is_empty() {
-            self.notify(format!("{} agents online", self.hub.agents.len()));
+            let images = self.images.as_ref().map_or("off".into(), |im| im.protocol());
+            self.notify(format!("{} agents online · images: {images}", self.hub.agents.len()));
         }
         if let Some(name) = replied.iter().find(|n| self.awaiting.contains(*n)) {
             if self.sound {

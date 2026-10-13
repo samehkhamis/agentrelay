@@ -1,5 +1,6 @@
 //! Drawing a hub feed as terminal lines: day dividers, author headers, bodies.
 
+use super::images::Images;
 use super::markdown;
 use crate::hub::feed::{self, Body, Clamp, Post};
 use crate::{theme, uploads};
@@ -22,9 +23,27 @@ impl Cache {
     }
 }
 
-pub fn layout(posts: &[Post], width: usize, cache: &mut Cache) -> Vec<Line<'static>> {
+/// Rows reserved in the laid-out lines for an image, drawn after the text.
+pub struct Slot {
+    /// Index of the first reserved line.
+    pub line: usize,
+    pub cols: u16,
+    pub rows: u16,
+    pub path: String,
+}
+
+/// The column where post bodies (and images) start: after the gutter.
+pub const BODY_X: u16 = 2;
+
+pub fn layout(
+    posts: &[Post],
+    width: usize,
+    cache: &mut Cache,
+    mut images: Option<&mut Images>,
+) -> (Vec<Line<'static>>, Vec<Slot>) {
     let body_width = width.saturating_sub(3).max(16);
     let mut lines = Vec::new();
+    let mut slots = Vec::new();
     for p in posts {
         if p.new_day {
             lines.push(Line::default());
@@ -39,9 +58,13 @@ pub fn layout(posts: &[Post], width: usize, cache: &mut Cache) -> Vec<Line<'stat
         for f in &p.files {
             let name = uploads::display_name(std::path::Path::new(f));
             lines.push(gutter(p, Line::styled(format!("📎 {name}"), Style::new().fg(theme::t().link))));
+            if let Some((cols, rows)) = images.as_deref_mut().and_then(|im| im.size(f, body_width as u16)) {
+                slots.push(Slot { line: lines.len(), cols, rows, path: f.to_string() });
+                lines.extend((0..rows).map(|_| gutter(p, Line::default())));
+            }
         }
     }
-    lines
+    (lines, slots)
 }
 
 fn day_divider(label: &str, width: usize) -> Line<'static> {

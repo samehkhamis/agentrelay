@@ -159,10 +159,10 @@ impl App {
     fn draw_feed(&mut self, f: &mut Frame, area: Rect) {
         let chan = self.current().clone();
         let posts = self.hub.posts(&chan);
-        let mut lines = if posts.is_empty() {
-            vec![Line::default(), Line::styled(empty_hint(&chan), Style::new().fg(theme::t().dim))]
+        let (mut lines, slots) = if posts.is_empty() {
+            (vec![Line::default(), Line::styled(empty_hint(&chan), Style::new().fg(theme::t().dim))], Vec::new())
         } else {
-            feed::layout(&posts, area.width.saturating_sub(1) as usize, &mut self.cache)
+            feed::layout(&posts, area.width.saturating_sub(1) as usize, &mut self.cache, self.images.as_mut())
         };
         drop(posts);
 
@@ -172,6 +172,14 @@ impl App {
         let start = lines.len().saturating_sub(h + self.scroll);
         let end = (start + h).min(lines.len());
         f.render_widget(Paragraph::new(lines.drain(start..end).collect::<Vec<_>>()), area);
+        // Images go into their reserved rows when those are fully on screen.
+        if let Some(images) = self.images.as_mut() {
+            for s in slots.iter().filter(|s| s.line >= start && s.line + s.rows as usize <= end) {
+                let x = area.x + feed::BODY_X;
+                let rect = Rect::new(x, area.y + (s.line - start) as u16, s.cols.min(area.right() - x), s.rows);
+                images.draw(f, rect, &s.path);
+            }
+        }
         if self.scroll > 0 {
             let note = format!(" ↓ {} more lines · Esc to jump down ", self.scroll);
             let w = note.width() as u16;
