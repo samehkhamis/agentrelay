@@ -24,6 +24,9 @@ local sockets.
 - **Clickable files.** Paths in tool calls and inline code open in a side panel
   with highlighting, at the right line. `/open` fuzzy-finds any file in the
   agent's folder.
+- **Markdown preview.** Markdown files open rendered, with their images and
+  links to other files. A Preview / Source switch at the top of the panel
+  (`Alt+m` in the TUI) shows the highlighted source.
 - **Attachments.** Drag, drop or paste images and files into either UI. The
   agent gets their paths.
 - **Start agents** with `/new claude|codex [folder] [prompt]` or the **+**
@@ -104,6 +107,7 @@ against `tailscaled`), so other people on a shared tailnet can't use it.
 | `Ctrl+O` | pick a file mentioned in this conversation |
 | `Ctrl+E` | expand or collapse all tool calls |
 | `Ctrl+T` | next theme |
+| `Alt+m` | switch a markdown file between preview and source |
 | `Alt+←` / `Alt+→` | resize the sidebar (`Alt+Shift` resizes the file pane) |
 | `Ctrl+C` / `Ctrl+Q` | quit |
 
@@ -136,6 +140,8 @@ These work in both UIs and autocomplete as you type.
 | ![gruvbox, with a file open](docs/screenshots/theme-gruvbox.png) | ![slack, the #all channel](docs/screenshots/web-all.png) |
 
 ![A file opened from a link, at the mentioned line](docs/screenshots/web-file.png)
+
+![A markdown file previewed in the file panel](docs/screenshots/web-preview.png)
 
 ## How it works
 
