@@ -37,6 +37,22 @@ In practice:
 - agentrelay doesn't own any agent process. Quitting or restarting it doesn't
   affect your agents.
 
+### What about Claude's and Codex's own remote access?
+
+Claude Code has [Remote Control](https://code.claude.com/docs/en/remote-control)
+and Codex has Codex Remote. Both let you drive a session running on your
+machine from a phone or browser, and they're good at that. agentrelay does
+something different:
+
+- **All your agents in one place.** Each vendor's remote shows its own
+  sessions. agentrelay puts Claude and Codex side by side, grouped by project,
+  with unread counts and one `/status` that asks a whole channel at once.
+- **Nothing to opt in.** Remote access is turned on per session or per
+  machine. agentrelay picks up every session that's already running.
+- **Stays on your network.** Their remote traffic goes through Anthropic's or
+  OpenAI's servers. agentrelay talks to your agents locally and reaches your
+  phone over your own tailnet.
+
 ## Features
 
 - **Channels.** `#all`, `#claude` and `#codex`, plus a channel for each project.
