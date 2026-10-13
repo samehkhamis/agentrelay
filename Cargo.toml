@@ -7,8 +7,9 @@ edition = "2024"
 anyhow = "1.0.104"
 base64 = "0.23.1"
 chrono = "0.4.45"
-cpal = { version = "0.18.2", features = ["pulseaudio"] }
+ignore = "0.4.33"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+nucleo-matcher = "0.3.1"
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }
 ratatui = "0.30.2"
 ratatui-image = { version = "11", default-features = false, features = ["crossterm", "image-defaults"] }
@@ -21,3 +22,8 @@ syntect = { version = "5.3.0", default-features = false, features = ["default-fa
 tiny_http = "0.12.0"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
 unicode-width = "0.2.2"
+
+# A pure-Rust PulseAudio client for the chime (reaches WSLg); other systems use
+# rodio's default output.
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "0.18.2", features = ["pulseaudio"] }

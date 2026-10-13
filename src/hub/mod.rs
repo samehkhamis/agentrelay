@@ -27,6 +27,10 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
 const HISTORY: i64 = 3000;
+const FILE_LIST_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// A folder's file list and when it was read.
+type FileList = (std::time::Instant, std::sync::Arc<Vec<String>>);
 /// A post's resolved file mentions: its tool call's file, or the inline code
 /// in its text. Images are left out; they show inline already.
 fn mentions(p: &Post) -> Vec<(String, FileRef)> {
@@ -93,6 +97,8 @@ pub struct Hub {
     seen: HashMap<String, i64>,
     /// Transcripts followed for DMs, by agent name.
     tails: HashMap<String, Tail>,
+    /// Folder file lists for `/open`, with when they were read.
+    file_lists: std::cell::RefCell<HashMap<String, FileList>>,
     agents_rx: Receiver<Vec<Agent>>,
 }
 
@@ -109,6 +115,7 @@ impl Hub {
             agents: Vec::new(),
             channels: Vec::new(),
             tails: HashMap::new(),
+            file_lists: Default::default(),
             agents_rx: watcher::spawn(),
         };
         hub.channels = channels::build(&hub.agents, &hub.msgs);
@@ -378,10 +385,28 @@ impl Hub {
         Ok((!targets.is_empty()).then_some(Delivery { targets, text, images }))
     }
 
-    /// Autocomplete for a composer line (folders are only read for `/new`).
-    pub fn complete(&self, line: &str) -> Vec<Completion> {
+    /// Autocomplete for a composer line in a channel (folders are only read
+    /// for `/new`, the channel's files only for `/open`).
+    pub fn complete(&self, chan_id: &str, line: &str) -> Vec<Completion> {
         let folders = if line.starts_with("/new ") { self.folders() } else { Vec::new() };
-        completions(line, &folders)
+        let files = match (line.starts_with("/open "), self.channel(chan_id).and_then(|c| self.default_folder(c))) {
+            (true, Some(root)) => self.folder_files(&root),
+            _ => std::sync::Arc::default(),
+        };
+        completions(line, &folders, &files)
+    }
+
+    /// A folder's files, cached briefly so `/open` stays fast while typing.
+    fn folder_files(&self, root: &str) -> std::sync::Arc<Vec<String>> {
+        let mut cache = self.file_lists.borrow_mut();
+        match cache.get(root) {
+            Some((at, files)) if at.elapsed() < FILE_LIST_TTL => files.clone(),
+            _ => {
+                let files = std::sync::Arc::new(files::list(std::path::Path::new(root)));
+                cache.insert(root.to_string(), (std::time::Instant::now(), files.clone()));
+                files
+            }
+        }
     }
 
 

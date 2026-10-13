@@ -165,7 +165,10 @@ fn call(port: u16, method: &str, path: &str) -> Result<String> {
 /// This machine's tailnet name (e.g. `box.tailnet.ts.net`) and owner, from
 /// the local tailscaled API.
 fn tailnet() -> Option<Tailnet> {
-    let mut s = std::os::unix::net::UnixStream::connect("/var/run/tailscale/tailscaled.sock").ok()?;
+    // Linux, then macOS's open-source tailscaled. (The macOS App Store app
+    // doesn't expose this socket, so only localhost works with it.)
+    let sockets = ["/var/run/tailscale/tailscaled.sock", "/var/run/tailscaled.socket"];
+    let mut s = sockets.iter().find_map(|p| std::os::unix::net::UnixStream::connect(p).ok())?;
     s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
     s.write_all(b"GET /localapi/v0/status HTTP/1.0\r\nHost: local-tailscaled.sock\r\n\r\n").ok()?;
     let mut out = String::new();
@@ -257,7 +260,7 @@ fn handle(mut req: Request, shared: &Shared) {
             respond_json(req, v)
         }
         (Method::Get, "/api/complete") => {
-            let list = shared.hub.lock().unwrap().complete(&arg("text").unwrap_or_default());
+            let list = shared.hub.lock().unwrap().complete(&arg("channel").unwrap_or_default(), &arg("text").unwrap_or_default());
             respond_json(req, json!(list))
         }
         (Method::Get, "/api/feed") => {
@@ -429,6 +432,7 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
         Some(Input::Help) => return json!({ "note": hub::help() }),
         Some(Input::Theme(None)) => return json!({ "note": hub::theme_list() }),
         Some(Input::New { kind, folder, prompt }) => return start_agent(shared, channel, kind, folder.as_deref(), &prompt),
+        Some(Input::Open(file)) => return json!({ "open": file }),
         Some(Input::Rename(name)) => {
             let renamed = shared.hub.lock().unwrap().rename(channel, &name); // run outside the lock
             return match renamed {

@@ -8,10 +8,11 @@ const STATUS_ASK: &str = "Quick status update please: what are you working on, w
                           and is anything blocked? 2-3 lines.";
 /// Commands: (name, usage after the name, what it does). `!` isn't a slash
 /// command, so autocomplete skips it, but help lists it.
-const COMMANDS: [(&str, &str, &str); 7] = [
+const COMMANDS: [(&str, &str, &str); 8] = [
     ("/status", "", "ask everyone here for a status update"),
     ("/new", "claude|codex [folder] [prompt]", "start an agent"),
     ("/rename", "<name>", "rename this DM's conversation"),
+    ("/open", "<file>", "open a file from this agent's folder"),
     ("/theme", "[name]", "switch the theme for every UI"),
     ("/sound", "", "turn the reply chime on or off"),
     ("/quit", "", "leave agentchat"),
@@ -43,8 +44,9 @@ pub struct Completion {
 }
 
 /// Suggestions for a composer line starting with `/`: commands, then their
-/// arguments (agent kinds, theme names, folders).
-pub fn completions(line: &str, folders: &[String]) -> Vec<Completion> {
+/// arguments (agent kinds, theme names, folders, and for `/open` the fuzzy
+/// matches among `files`).
+pub fn completions(line: &str, folders: &[String], files: &[String]) -> Vec<Completion> {
     let item = |line: String, label: &str, detail: &str, run: bool| Completion {
         line,
         label: label.to_string(),
@@ -64,6 +66,10 @@ pub fn completions(line: &str, folders: &[String]) -> Vec<Completion> {
             .collect();
     };
     match cmd {
+        "open" => crate::files::fuzzy(files, arg.trim(), 12)
+            .into_iter()
+            .map(|f| item(format!("/open {f}"), f, "", true))
+            .collect(),
         "theme" => theme::names()
             .into_iter()
             .filter(|n| n.starts_with(arg.trim()) && *n != arg.trim())
@@ -99,6 +105,8 @@ pub enum Input {
     Shell(String),
     /// `/rename <name>`: rename a DM's conversation.
     Rename(String),
+    /// `/open <file>`: view a file from the channel's folder.
+    Open(String),
     /// `/theme name`, or `/theme` alone to list them.
     Theme(Option<String>),
     ToggleSound,
@@ -110,6 +118,10 @@ pub fn parse_input(text: &str) -> Option<Input> {
     let text = text.trim();
     if let Some(cmd) = text.strip_prefix('!') {
         return (!cmd.trim().is_empty()).then(|| Input::Shell(cmd.trim().to_string()));
+    }
+    if let Some(file) = text.strip_prefix("/open") {
+        let file = file.trim();
+        return Some(if file.is_empty() { Input::Help } else { Input::Open(file.to_string()) });
     }
     if let Some(name) = text.strip_prefix("/rename") {
         let name = name.trim();
@@ -161,9 +173,11 @@ mod tests {
     #[test]
     fn completes_commands_and_arguments() {
         use super::completions;
-        let labels = |line: &str| completions(line, &["/home/x/code/api".into()]).into_iter().map(|c| c.line).collect::<Vec<_>>();
+        let files = ["src/main.rs".to_string(), "README.md".to_string()];
+        let labels = |line: &str| completions(line, &["/home/x/code/api".into()], &files).into_iter().map(|c| c.line).collect::<Vec<_>>();
         assert_eq!(labels("/s"), ["/status", "/sound"]);
         assert_eq!(labels("/re"), ["/rename "]);
+        assert_eq!(labels("/open main"), ["/open src/main.rs"]);
         assert_eq!(labels("/new c"), ["/new claude ", "/new codex "]);
         assert_eq!(labels("/theme dra"), ["/theme dracula"]);
         assert!(labels("hello").is_empty());

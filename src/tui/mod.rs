@@ -274,6 +274,7 @@ impl App {
                 let task = self.hub.start_agent(&self.selected, kind, folder.as_deref(), &prompt);
                 self.background(task, format!("starting {}…", kind.as_str()));
             }
+            Some(Input::Open(file)) => self.open_file(&file),
             Some(Input::Rename(name)) => {
                 let renamed = self.hub.rename(&self.selected.clone(), &name);
                 let task = renamed.map(|(task, follow)| {
@@ -357,7 +358,7 @@ impl App {
         if self.editor.shell || self.dismissed.as_deref() == Some(text) {
             return Vec::new();
         }
-        self.hub.complete(text)
+        self.hub.complete(&self.selected, text)
     }
 
     /// Keys for an open suggestion list. False if the key isn't one of them.

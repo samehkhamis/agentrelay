@@ -307,6 +307,7 @@ async function submit() {
   pending = [];
   renderPending();
   const r = await api("/api/send", { channel: current, text, files });
+  if (r.open) return openFile(r.open);
   if (r.delivered) {
     r.delivered.forEach((a) => awaiting.add(a));
     toast(r.note);
@@ -413,7 +414,7 @@ async function complete() {
   if (shell || !text.startsWith("/")) {
     suggestions = [];
   } else {
-    const list = await api(`/api/complete?${new URLSearchParams({ text })}`);
+    const list = await api(`/api/complete?${new URLSearchParams({ channel: current, text })}`);
     if ($("input").value !== text) return; // typed on meanwhile
     suggestions = list;
   }

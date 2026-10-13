@@ -1,10 +1,10 @@
 //! The ping played when an agent posts: a short two-note chime synthesized
-//! with rodio and played through cpal's `pulseaudio` host, a pure-Rust
-//! PulseAudio client. That is what reaches WSLg, whose ALSA has no pulse
-//! plugin. AGENTCHAT_SOUND=off silences it.
+//! with rodio. On Linux it plays through cpal's `pulseaudio` host, a pure-Rust
+//! PulseAudio client (what reaches WSLg, whose ALSA has no pulse plugin);
+//! elsewhere through the default output (Core Audio on macOS).
+//! AGENTCHAT_SOUND=off silences it.
 
 use rodio::source::SineWave;
-use rodio::cpal::traits::HostTrait;
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, OnceLock};
@@ -15,6 +15,7 @@ static LAST: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// Points the PulseAudio client at the per-user socket when the environment
 /// doesn't (e.g. launched without XDG_RUNTIME_DIR). Call before threads start.
+#[cfg(target_os = "linux")]
 pub fn init_env() {
     if std::env::var_os("PULSE_SERVER").is_some() || std::env::var_os("XDG_RUNTIME_DIR").is_some() {
         return;
@@ -28,12 +29,22 @@ pub fn init_env() {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+pub fn init_env() {}
+
 /// PulseAudio only: the ALSA fallback would print errors over the TUI and,
 /// under WSLg, has no device anyway.
+#[cfg(target_os = "linux")]
 fn open_sink() -> Option<MixerDeviceSink> {
+    use rodio::cpal::traits::HostTrait;
     let host = rodio::cpal::host_from_id(rodio::cpal::HostId::PulseAudio).ok()?;
     let device = host.default_output_device()?;
     DeviceSinkBuilder::from_device(device).ok()?.open_stream().ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_sink() -> Option<MixerDeviceSink> {
+    DeviceSinkBuilder::open_default_sink().ok()
 }
 
 pub fn enabled_by_default() -> bool {

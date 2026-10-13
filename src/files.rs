@@ -37,6 +37,45 @@ fn split_line(raw: &str) -> (&str, Option<usize>) {
     if line.is_some() { (name, line) } else { (raw, None) }
 }
 
+/// Files listed per folder, at most.
+const LIST_MAX: usize = 50_000;
+
+/// A folder's files, relative to it: a parallel walk with the `ignore` crate
+/// (what fd and ripgrep use), skipping `.gitignore`d and hidden files.
+pub fn list(root: &std::path::Path) -> Vec<String> {
+    let found = std::sync::Mutex::new(Vec::new());
+    ignore::WalkBuilder::new(root).build_parallel().run(|| {
+        let found = &found;
+        Box::new(move |entry| {
+            let Ok(e) = entry else { return ignore::WalkState::Continue };
+            if e.file_type().is_some_and(|t| t.is_file()) {
+                let mut found = found.lock().unwrap();
+                if found.len() >= LIST_MAX {
+                    return ignore::WalkState::Quit;
+                }
+                if let Ok(rel) = e.path().strip_prefix(root) {
+                    found.push(rel.to_string_lossy().into_owned());
+                }
+            }
+            ignore::WalkState::Continue
+        })
+    });
+    let mut files = found.into_inner().unwrap();
+    files.sort();
+    files
+}
+
+/// The best fuzzy matches for `query` among `files` (Helix's matcher, tuned
+/// for paths), best first.
+pub fn fuzzy<'a>(files: &'a [String], query: &str, limit: usize) -> Vec<&'a str> {
+    use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+    let mut matcher = nucleo_matcher::Matcher::new(nucleo_matcher::Config::DEFAULT.match_paths());
+    let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
+    let mut hits = pattern.match_list(files.iter().map(String::as_str), &mut matcher);
+    hits.truncate(limit);
+    hits.into_iter().map(|(f, _)| f).collect()
+}
+
 /// Up to this much of a file is shown.
 pub const VIEW_MAX: usize = 512 << 10;
 
@@ -62,6 +101,14 @@ mod tests {
         assert_eq!(split_line("src/a.rs:42-50"), ("src/a.rs", Some(42)));
         assert_eq!(split_line("src/a.rs"), ("src/a.rs", None));
         assert_eq!(split_line("http://x"), ("http://x", None));
+    }
+
+    #[test]
+    fn lists_and_fuzzy_finds() {
+        let files = super::list(std::path::Path::new(env!("CARGO_MANIFEST_DIR")));
+        assert!(files.iter().any(|f| f == "src/files.rs"));
+        assert!(!files.iter().any(|f| f.starts_with("target/"))); // gitignored
+        assert_eq!(super::fuzzy(&files, "tuimarkdown", 1), ["src/tui/markdown.rs"]);
     }
 
     #[test]
