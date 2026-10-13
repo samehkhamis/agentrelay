@@ -8,7 +8,7 @@ mod watcher;
 
 use crate::agents::{Agent, Kind, Presence};
 use crate::db::{self, Msg};
-use crate::ipc;
+use crate::{ipc, theme};
 use crate::transcript::Tail;
 use crate::uploads;
 use anyhow::Result;
@@ -22,18 +22,25 @@ use std::sync::mpsc::Receiver;
 const HISTORY: i64 = 3000;
 const STATUS_ASK: &str = "Quick status update please: what are you working on, what's done, \
                           and is anything blocked? 2-3 lines.";
-pub const HELP: &str = "commands: /status  /sound  /quit";
+pub const HELP: &str = "commands: /status  /theme [name]  /sound  /quit";
 
 /// What the user typed in a composer.
 pub enum Input {
     Send(String),
+    /// `/theme name`, or `/theme` alone to list them.
+    Theme(Option<String>),
     ToggleSound,
     Quit,
     Help,
 }
 
 pub fn parse_input(text: &str) -> Option<Input> {
-    Some(match text.trim() {
+    let text = text.trim();
+    if let Some(rest) = text.strip_prefix("/theme") {
+        let name = rest.trim();
+        return Some(Input::Theme((!name.is_empty()).then(|| name.to_string())));
+    }
+    Some(match text {
         "" => return None,
         "/quit" | "/q" => Input::Quit,
         "/sound" => Input::ToggleSound,
@@ -41,6 +48,15 @@ pub fn parse_input(text: &str) -> Option<Input> {
         t if t.starts_with('/') => Input::Help,
         t => Input::Send(t.into()),
     })
+}
+
+/// The `/theme` reply: the themes, the active one marked.
+pub fn theme_list() -> String {
+    let names: Vec<String> = theme::names()
+        .into_iter()
+        .map(|n| if n == theme::t().name { format!("[{n}]") } else { n.to_string() })
+        .collect();
+    format!("themes: {}", names.join(" "))
 }
 
 /// A message logged and ready to deliver: run [`Delivery::run`] off the UI thread.
@@ -86,7 +102,34 @@ impl Hub {
             agents_rx: watcher::spawn(),
         };
         hub.channels = channels::build(&hub.agents, &hub.msgs);
+        hub.sync_theme()?;
         Ok(hub)
+    }
+
+    /// Adopts the theme chosen in any UI.
+    fn sync_theme(&self) -> Result<()> {
+        if let Some(name) = db::setting(&self.conn, "theme")? {
+            theme::set(&name);
+        }
+        Ok(())
+    }
+
+    /// Switches every UI to a theme. False if there's no such theme.
+    pub fn set_theme(&mut self, name: &str) -> Result<bool> {
+        if !theme::set(name) {
+            return Ok(false);
+        }
+        db::set_setting(&self.conn, "theme", name)?;
+        Ok(true)
+    }
+
+    /// Steps to the next theme, for every UI; returns its name.
+    pub fn cycle_theme(&mut self) -> Result<&'static str> {
+        let names = theme::names();
+        let i = names.iter().position(|n| *n == theme::t().name).unwrap_or(0);
+        let next = names[(i + 1) % names.len()];
+        self.set_theme(next)?;
+        Ok(next)
     }
 
     /// Picks up new messages, agents and read marks. Returns the agents that
@@ -115,6 +158,7 @@ impl Hub {
             self.channels = channels::build(&self.agents, &self.msgs);
         }
         self.seen = db::seen(&self.conn)?;
+        self.sync_theme()?;
         if first_batch {
             // Channels never opened anywhere start out read.
             for c in &self.channels {
@@ -186,8 +230,8 @@ impl Hub {
     /// Changes whenever the channel's feed does, so a UI can skip redrawing.
     pub fn version(&self, chan: &Channel) -> String {
         match chan.agent().and_then(|n| self.tails.get(n)) {
-            Some(t) => format!("t{}", t.version()),
-            None => format!("m{}", self.last_id),
+            Some(t) => format!("{}:t{}", theme::t().name, t.version()),
+            None => format!("{}:m{}", theme::t().name, self.last_id),
         }
     }
 

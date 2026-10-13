@@ -17,9 +17,9 @@ const TOAST_FOR: Duration = Duration::from_secs(4);
 
 fn presence_dot(p: Option<Presence>) -> Span<'static> {
     match p {
-        Some(Presence::Busy) => Span::styled("● ", Style::new().fg(theme::BUSY)),
-        Some(Presence::Online) => Span::styled("● ", Style::new().fg(theme::ONLINE)),
-        _ => Span::styled("○ ", Style::new().fg(theme::SIDEBAR_DIM)),
+        Some(Presence::Busy) => Span::styled("● ", Style::new().fg(theme::t().busy)),
+        Some(Presence::Online) => Span::styled("● ", Style::new().fg(theme::t().online)),
+        _ => Span::styled("○ ", Style::new().fg(theme::t().sidebar_dim)),
     }
 }
 
@@ -30,6 +30,8 @@ impl App {
             Layout::vertical([Constraint::Length(2), Constraint::Min(1), Constraint::Length(3)]).areas(main);
         self.sidebar_area = side;
         self.feed_area = body;
+        let th = theme::t();
+        f.render_widget(Block::new().style(Style::new().bg(th.bg).fg(th.fg)), main);
         self.draw_sidebar(f, side);
         self.draw_header(f, header);
         self.draw_feed(f, body);
@@ -44,15 +46,15 @@ impl App {
     // ------------------------------------------------------------ sidebar
 
     fn draw_sidebar(&mut self, f: &mut Frame, area: Rect) {
-        f.render_widget(Block::new().style(Style::new().bg(theme::SIDEBAR_BG)), area);
+        f.render_widget(Block::new().style(Style::new().bg(theme::t().sidebar_bg)), area);
         let width = area.width.saturating_sub(1) as usize;
-        let dim = Style::new().fg(theme::SIDEBAR_DIM);
+        let dim = Style::new().fg(theme::t().sidebar_dim);
         let online = self.hub.online();
         let mut rows: Vec<(Line, Option<&str>)> = vec![
             (Line::styled(" agentchat", Style::new().fg(Color::White).bold()), None),
             (
                 Line::from(vec![
-                    Span::styled(" ● ", Style::new().fg(theme::ONLINE)),
+                    Span::styled(" ● ", Style::new().fg(theme::t().online)),
                     Span::styled(format!("{} · {online} online", self.hub.me), dim),
                 ]),
                 None,
@@ -73,7 +75,7 @@ impl App {
             rows.push((self.sidebar_row(c, width), Some(c.id.as_str())));
         }
         rows.push((Line::default(), None));
-        rows.push((Line::styled(" Tab/Alt+↑↓ switch · /status", dim), None));
+        rows.push((Line::styled(" Tab switch · Ctrl+T theme", dim), None));
 
         // Keep the selected row on screen.
         let h = area.height as usize;
@@ -95,26 +97,26 @@ impl App {
         let selected = c.id == self.selected;
         let unread = if selected { 0 } else { self.hub.unread(c) };
         let base = if selected {
-            Style::new().bg(theme::SELECTED_BG).fg(Color::White)
+            Style::new().bg(theme::t().selected_bg).fg(Color::White)
         } else if unread > 0 {
             Style::new().fg(Color::White).add_modifier(Modifier::BOLD)
         } else {
-            Style::new().fg(theme::SIDEBAR_FG)
+            Style::new().fg(theme::t().sidebar_fg)
         };
         let lead = match c.section {
-            Section::Direct if selected => presence_dot(c.presence).bg(theme::SELECTED_BG),
+            Section::Direct if selected => presence_dot(c.presence).bg(theme::t().selected_bg),
             Section::Direct => presence_dot(c.presence),
             _ => Span::styled("# ", base),
         };
         let (right, right_style) = if unread > 0 {
-            (format!(" {unread} "), Style::new().bg(theme::BADGE_BG).fg(Color::White).bold())
+            (format!(" {unread} "), Style::new().bg(theme::t().badge_bg).fg(Color::White).bold())
         } else {
             let text = match c.section {
                 Section::Direct => format!("{} ", c.kind.unwrap_or(Kind::Claude).as_str()),
                 Section::Projects => format!("{} ", self.hub.members(c).len()),
                 Section::Top => String::new(),
             };
-            let color = c.kind.map_or(theme::SIDEBAR_DIM, |k| theme::kind_color(k.as_str()));
+            let color = c.kind.map_or(theme::t().sidebar_dim, |k| theme::kind_color(k.as_str()));
             (text, if selected { base } else { Style::new().fg(color) })
         };
         let used = 4 + right.width();
@@ -137,7 +139,7 @@ impl App {
 
     fn draw_header(&self, f: &mut Frame, area: Rect) {
         let c = self.current();
-        let dim = Style::new().fg(theme::DIM);
+        let dim = Style::new().fg(theme::t().dim);
         let mut line = match c.section {
             Section::Direct => Line::from(vec![presence_dot(c.presence), Span::raw(c.name().to_string()).bold()]),
             _ => Line::from(Span::raw(format!(" {}", c.title())).bold()),
@@ -146,7 +148,7 @@ impl App {
         if let Some((t, _)) = self.toast.as_ref().filter(|(_, at)| at.elapsed() < TOAST_FOR) {
             let pad = (area.width as usize).saturating_sub(line.width() + t.width() + 3);
             line.push_span(Span::raw(" ".repeat(pad)));
-            line.push_span(Span::styled(format!("{t} "), Style::new().fg(theme::USER).italic()));
+            line.push_span(Span::styled(format!("{t} "), Style::new().fg(theme::t().user).italic()));
         }
         let block = Block::new().borders(Borders::BOTTOM).border_style(dim);
         f.render_widget(Paragraph::new(line).block(block), area);
@@ -158,7 +160,7 @@ impl App {
         let chan = self.current().clone();
         let posts = self.hub.posts(&chan);
         let mut lines = if posts.is_empty() {
-            vec![Line::default(), Line::styled(empty_hint(&chan), Style::new().fg(theme::DIM))]
+            vec![Line::default(), Line::styled(empty_hint(&chan), Style::new().fg(theme::t().dim))]
         } else {
             feed::layout(&posts, area.width.saturating_sub(1) as usize, &mut self.cache)
         };
@@ -174,23 +176,23 @@ impl App {
             let note = format!(" ↓ {} more lines · Esc to jump down ", self.scroll);
             let w = note.width() as u16;
             let r = Rect::new(area.right().saturating_sub(w + 1), area.bottom() - 1, w, 1);
-            f.render_widget(Paragraph::new(note).style(Style::new().bg(theme::SELECTED_BG).fg(Color::White)), r);
+            f.render_widget(Paragraph::new(note).style(Style::new().bg(theme::t().selected_bg).fg(Color::White)), r);
         }
     }
 
     // ------------------------------------------------------------ composer
 
     fn draw_composer(&self, f: &mut Frame, area: Rect) {
-        let mut block = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(theme::DIM));
+        let mut block = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(theme::t().dim));
         if !self.pending.is_empty() {
             let names: Vec<String> = self.pending.iter().map(|p| uploads::display_name(p)).collect();
             let title = format!(" 📎 {} ", names.join("  "));
-            block = block.title(Span::styled(title, Style::new().fg(theme::LINK)));
+            block = block.title(Span::styled(title, Style::new().fg(theme::t().link)));
         }
         let inner = block.inner(area);
         let (shown, cursor) = self.editor.view(inner.width as usize);
         let para = if self.editor.is_empty() {
-            Paragraph::new(Span::styled(format!("Message {}", self.current().title()), Style::new().fg(theme::DIM)))
+            Paragraph::new(Span::styled(format!("Message {}", self.current().title()), Style::new().fg(theme::t().dim)))
         } else {
             Paragraph::new(shown)
         };

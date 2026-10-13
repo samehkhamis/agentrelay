@@ -9,25 +9,29 @@ use syntect::util::LinesWithEndings;
 
 pub type Rgb = (u8, u8, u8);
 
-const THEME: &str = "base16-ocean.dark";
-
-fn assets() -> &'static (SyntaxSet, Theme) {
-    static ASSETS: OnceLock<(SyntaxSet, Theme)> = OnceLock::new();
-    ASSETS.get_or_init(|| (SyntaxSet::load_defaults_newlines(), ThemeSet::load_defaults().themes[THEME].clone()))
+fn assets() -> &'static (SyntaxSet, ThemeSet) {
+    static ASSETS: OnceLock<(SyntaxSet, ThemeSet)> = OnceLock::new();
+    ASSETS.get_or_init(|| (SyntaxSet::load_defaults_newlines(), ThemeSet::load_defaults()))
 }
 
-/// The theme's background, for code block backgrounds.
+/// The syntax theme matching the active color theme.
+fn syntax_theme() -> &'static Theme {
+    let themes = &assets().1.themes;
+    themes.get(crate::theme::t().syntax).unwrap_or_else(|| &themes["base16-ocean.dark"])
+}
+
+/// The syntax theme's background, for code block backgrounds.
 pub fn background() -> Rgb {
-    let c = assets().1.settings.background.unwrap_or(syntect::highlighting::Color::BLACK);
+    let c = syntax_theme().settings.background.unwrap_or(syntect::highlighting::Color::BLACK);
     (c.r, c.g, c.b)
 }
 
 /// `code` highlighted as `lang` (a fence tag like `rust` or `py`; plain text if
 /// unknown): one token list per source line, tabs expanded.
 pub fn lines(lang: &str, code: &str) -> Vec<Vec<(Rgb, String)>> {
-    let (syntaxes, theme) = assets();
+    let syntaxes = &assets().0;
     let syntax = syntaxes.find_syntax_by_token(lang).unwrap_or_else(|| syntaxes.find_syntax_plain_text());
-    let mut hl = HighlightLines::new(syntax, theme);
+    let mut hl = HighlightLines::new(syntax, syntax_theme());
     LinesWithEndings::from(code)
         .map(|line| {
             hl.highlight_line(line, syntaxes)

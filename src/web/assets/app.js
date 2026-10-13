@@ -57,9 +57,24 @@ function channel(id) {
   return state.channels.find((c) => c.id === id);
 }
 
+// Follows theme changes made in either UI.
+function applyTheme() {
+  const picker = $("theme");
+  if (picker.options.length !== state.themes.length) {
+    picker.replaceChildren(...state.themes.map((n) => Object.assign(el("option", "", n), { value: n })));
+  }
+  picker.value = state.theme;
+  const href = `/theme.css?${encodeURIComponent(state.theme)}`;
+  if ($("theme-css").getAttribute("href") !== href) {
+    $("theme-css").setAttribute("href", href);
+    feedVersion = null; // code highlighting changes with the theme
+  }
+}
+
 async function refreshState() {
   const prev = state.statuses;
   state = await api("/api/state");
+  applyTheme();
   for (const [agent, id] of Object.entries(state.statuses)) {
     if (awaiting.has(agent) && prev[agent] !== undefined && id > prev[agent]) {
       awaiting.delete(agent);
@@ -257,6 +272,7 @@ async function submit() {
     toast(`delivered to ${r.delivered.length}${r.failed.length ? ` · failed: ${r.failed.join(", ")}` : ""}`);
   } else if (r.note) {
     toast(r.note);
+    if (r.theme) await refreshState();
   }
   feedVersion = null;
   refreshFeed();
@@ -334,6 +350,12 @@ document.addEventListener("paste", (e) => {
   e.preventDefault();
   upload(files);
 });
+$("theme").onchange = async () => {
+  const r = await api("/api/theme", { name: $("theme").value });
+  if (r.note) toast(r.note);
+  await refreshState();
+  refreshFeed();
+};
 $("attach").onclick = () => $("file").click();
 $("file").onchange = () => {
   upload($("file").files);

@@ -188,6 +188,10 @@ fn handle(mut req: Request, shared: &Shared) {
             shared.hub.lock().unwrap().mark_seen(&arg("channel").unwrap_or_default());
             respond_json(req, json!({ "ok": true }))
         }
+        (Method::Post, "/api/theme") => {
+            let v = set_theme(shared, &arg("name").unwrap_or_default());
+            respond_json(req, v)
+        }
         (Method::Post, "/api/upload") => {
             let name = arg("name").unwrap_or_else(|| "file".into());
             let v = match uploads::save(&name, &raw) {
@@ -266,6 +270,8 @@ fn state(shared: &Shared) -> Value {
         "channels": channels,
         "statuses": hub.last_statuses(),
         "help": hub::HELP,
+        "theme": theme::t().name,
+        "themes": theme::names(),
     })
 }
 
@@ -288,7 +294,8 @@ fn feed(shared: &Shared, channel: &str, v: Option<&str>) -> Value {
         .map(|p| {
             let (html, tool, clamp) = match &p.body {
                 Body::Markdown { text, clamp } => {
-                    let html = cache.entry(p.key.clone()).or_insert_with(|| render::markdown(text)).clone();
+                    let key = format!("{}:{}", theme::t().name, p.key); // code colors follow the theme
+                    let html = cache.entry(key).or_insert_with(|| render::markdown(text)).clone();
                     let clamp = match clamp {
                         Clamp::Off => Value::Null,
                         Clamp::ToDm => json!("dm"),
@@ -326,6 +333,8 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
         Some(Input::Send(body)) => body,
         None if !files.is_empty() => String::new(),
         Some(Input::Help) => return json!({ "note": hub::HELP }),
+        Some(Input::Theme(None)) => return json!({ "note": hub::theme_list() }),
+        Some(Input::Theme(Some(name))) => return set_theme(shared, &name),
         _ => return json!({}),
     };
     // Log under the lock; deliver without it, since sockets can be slow.
@@ -340,33 +349,43 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
     }
 }
 
+fn set_theme(shared: &Shared, name: &str) -> Value {
+    match shared.hub.lock().unwrap().set_theme(name) {
+        Ok(true) => json!({ "note": format!("theme: {name}"), "theme": name }),
+        _ => json!({ "note": format!("no theme {name}; {}", hub::theme_list()) }),
+    }
+}
+
 fn file_json(path: &Path) -> Value {
     json!({ "id": uploads::id_of(path), "name": uploads::display_name(path), "image": uploads::is_image(path) })
 }
 
-/// The TUI's palette as CSS variables, so both UIs use the same colors.
+/// The active theme as CSS variables, so both UIs use the same colors.
 fn theme_css() -> String {
+    let th = theme::t();
     let hex = |c: Color| match c {
         Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
         _ => "inherit".into(),
     };
     let (r, g, b) = crate::highlight::background();
     let vars = [
-        ("sidebar-bg", theme::SIDEBAR_BG),
-        ("sidebar-fg", theme::SIDEBAR_FG),
-        ("sidebar-dim", theme::SIDEBAR_DIM),
-        ("selected-bg", theme::SELECTED_BG),
-        ("badge-bg", theme::BADGE_BG),
-        ("claude", theme::CLAUDE),
-        ("codex", theme::CODEX),
-        ("user", theme::USER),
-        ("busy", theme::BUSY),
-        ("online", theme::ONLINE),
-        ("dim", theme::DIM),
-        ("code", theme::CODE),
-        ("error", theme::ERROR),
-        ("link", theme::LINK),
-        ("subagent", theme::SUBAGENT),
+        ("bg", th.bg),
+        ("fg", th.fg),
+        ("sidebar-bg", th.sidebar_bg),
+        ("sidebar-fg", th.sidebar_fg),
+        ("sidebar-dim", th.sidebar_dim),
+        ("selected-bg", th.selected_bg),
+        ("badge-bg", th.badge_bg),
+        ("claude", th.claude),
+        ("codex", th.codex),
+        ("user", th.user),
+        ("subagent", th.subagent),
+        ("busy", th.busy),
+        ("online", th.online),
+        ("dim", th.dim),
+        ("code", th.code),
+        ("error", th.error),
+        ("link", th.link),
     ];
     let body: Vec<String> = vars.iter().map(|(k, c)| format!("--{k}:{};", hex(*c))).collect();
     format!(":root{{{}--code-bg:#{r:02x}{g:02x}{b:02x};}}", body.join(""))

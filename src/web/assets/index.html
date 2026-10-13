@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>agentchat</title>
-  <link rel="stylesheet" href="/theme.css">
+  <link id="theme-css" rel="stylesheet" href="/theme.css">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -14,7 +14,7 @@
       <div class="workspace-me"><span class="dot online"></span><span id="me"></span></div>
     </header>
     <nav id="channels"></nav>
-    <footer class="hint">Alt+↑↓ switch · /status · /sound</footer>
+    <footer class="hint"><span>Alt+↑↓ switch · /status</span><select id="theme" aria-label="Theme"></select></footer>
   </aside>
   <div id="backdrop"></div>
   <main>

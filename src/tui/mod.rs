@@ -11,7 +11,7 @@ mod paste;
 mod view;
 
 use crate::hub::{self, Hub, Input};
-use crate::{sound, uploads};
+use crate::{sound, theme, uploads};
 use anyhow::Result;
 use editor::Editor;
 use hub::channels::Channel;
@@ -50,6 +50,8 @@ pub struct App {
     /// Agents messaged that haven't replied since; their next reply pings.
     awaiting: HashSet<String>,
     cache: feed::Cache,
+    /// The theme the cache was rendered in.
+    cache_theme: &'static str,
     sent_tx: Sender<Sent>,
     sent_rx: Receiver<Sent>,
     quit: bool,
@@ -82,6 +84,7 @@ impl App {
             sound: sound::enabled_by_default(),
             awaiting: HashSet::new(),
             cache: feed::Cache::default(),
+            cache_theme: theme::t().name,
             sent_tx,
             sent_rx,
             quit: false,
@@ -140,6 +143,11 @@ impl App {
             self.notify(t);
         }
         self.hub.follow(&self.selected);
+        // Rendered lines carry colors; redo them when any UI switches theme.
+        if self.cache_theme != theme::t().name {
+            self.cache_theme = theme::t().name;
+            self.cache = feed::Cache::default();
+        }
         Ok(())
     }
 
@@ -165,6 +173,11 @@ impl App {
             Some(Input::Send(body)) => self.send(body)?,
             Some(Input::Quit) => self.quit = true,
             Some(Input::Help) => self.notify(hub::HELP),
+            Some(Input::Theme(None)) => self.notify(hub::theme_list()),
+            Some(Input::Theme(Some(name))) => match self.hub.set_theme(&name)? {
+                true => self.notify(format!("theme: {name}")),
+                false => self.notify(format!("no theme {name}; {}", hub::theme_list())),
+            },
             Some(Input::ToggleSound) => {
                 self.sound = !self.sound;
                 self.notify(format!("sound {}", if self.sound { "on" } else { "off" }));
@@ -215,6 +228,10 @@ impl App {
         let page = self.feed_height.saturating_sub(2).max(1);
         match k.code {
             KeyCode::Char('c' | 'q') if ctrl => self.quit = true,
+            KeyCode::Char('t') if ctrl => {
+                let name = self.hub.cycle_theme()?;
+                self.notify(format!("theme: {name} · Ctrl+T for the next"));
+            }
             KeyCode::Up if ctrl || alt => self.move_selection(-1),
             KeyCode::Down if ctrl || alt => self.move_selection(1),
             KeyCode::Char('p') if ctrl => self.move_selection(-1),

@@ -61,6 +61,8 @@ pub fn open() -> Result<Connection> {
         CREATE TABLE IF NOT EXISTS statuses (agent TEXT PRIMARY KEY, fingerprint TEXT NOT NULL);
         -- Last message id read per channel, shared by every UI.
         CREATE TABLE IF NOT EXISTS seen (channel TEXT PRIMARY KEY, last_id INTEGER NOT NULL);
+        -- Preferences shared by every UI, e.g. the theme.
+        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         -- The latest discovered agent list (JSON), and which process wrote it.
         CREATE TABLE IF NOT EXISTS agents (id INTEGER PRIMARY KEY CHECK (id = 1), pid INTEGER NOT NULL,
                                            ts INTEGER NOT NULL, json TEXT NOT NULL);",
@@ -177,6 +179,18 @@ pub fn set_agents_snapshot(conn: &Connection, json: &str) -> Result<()> {
         "INSERT INTO agents (id, pid, ts, json) VALUES (1, ?1, ?2, ?3)
          ON CONFLICT(id) DO UPDATE SET pid = excluded.pid, ts = excluded.ts, json = excluded.json",
         params![std::process::id(), now_ms(), json],
+    )?;
+    Ok(())
+}
+
+pub fn setting(conn: &Connection, key: &str) -> Result<Option<String>> {
+    Ok(conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+}
+
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
     )?;
     Ok(())
 }

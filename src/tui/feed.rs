@@ -38,7 +38,7 @@ pub fn layout(posts: &[Post], width: usize, cache: &mut Cache) -> Vec<Line<'stat
         lines.extend(body.iter().map(|l| gutter(p, l.clone())));
         for f in &p.files {
             let name = uploads::display_name(std::path::Path::new(f));
-            lines.push(gutter(p, Line::styled(format!("📎 {name}"), Style::new().fg(theme::LINK))));
+            lines.push(gutter(p, Line::styled(format!("📎 {name}"), Style::new().fg(theme::t().link))));
         }
     }
     lines
@@ -46,7 +46,7 @@ pub fn layout(posts: &[Post], width: usize, cache: &mut Cache) -> Vec<Line<'stat
 
 fn day_divider(label: &str, width: usize) -> Line<'static> {
     let side = "─".repeat(width.saturating_sub(label.width() + 2) / 2);
-    let dim = Style::new().fg(theme::DIM);
+    let dim = Style::new().fg(theme::t().dim);
     Line::from(vec![
         Span::styled(side.clone(), dim),
         Span::styled(format!(" {label} "), dim.bold()),
@@ -55,7 +55,7 @@ fn day_divider(label: &str, width: usize) -> Line<'static> {
 }
 
 fn header(p: &Post) -> Line<'static> {
-    let dim = Style::new().fg(theme::DIM);
+    let dim = Style::new().fg(theme::t().dim);
     let arrow = if p.is_subagent() { "↳ " } else { "" };
     let mut spans = vec![Span::styled(
         format!("{arrow}{}", p.author),
@@ -74,7 +74,7 @@ fn header(p: &Post) -> Line<'static> {
 /// The left margin: a colored bar for subagent activity, so it stands apart
 /// from the agent's own.
 fn gutter(p: &Post, mut l: Line<'static>) -> Line<'static> {
-    let mark = if p.is_subagent() { Span::styled("▍ ", Style::new().fg(theme::SUBAGENT)) } else { Span::raw("  ") };
+    let mark = if p.is_subagent() { Span::styled("▍ ", Style::new().fg(theme::t().subagent)) } else { Span::raw("  ") };
     l.spans.insert(0, mark);
     l
 }
@@ -90,12 +90,12 @@ fn render_body(body: &Body, width: usize) -> Vec<Line<'static>> {
             };
             if let Some(hint) = hint.filter(|_| lines.len() > feed::STATUS_LINES) {
                 lines.truncate(feed::STATUS_LINES);
-                lines.push(Line::styled(hint, Style::new().fg(theme::DIM).italic()));
+                lines.push(Line::styled(hint, Style::new().fg(theme::t().dim).italic()));
             }
             lines
         }
         Body::Tool { name, detail, error } => {
-            let (mark, color) = if *error { ("✗ ", theme::ERROR) } else { ("▸ ", theme::DIM) };
+            let (mark, color) = if *error { ("✗ ", theme::t().error) } else { ("▸ ", theme::t().dim) };
             let mut detail = detail.to_string();
             let room = width.saturating_sub(name.width() + 4);
             if detail.width() > room {
@@ -103,8 +103,8 @@ fn render_body(body: &Body, width: usize) -> Vec<Line<'static>> {
             }
             vec![Line::from(vec![
                 Span::styled(mark, Style::new().fg(color)),
-                Span::styled(name.to_string(), Style::new().fg(theme::DIM).bold()),
-                Span::styled(format!("  {detail}"), Style::new().fg(theme::DIM)),
+                Span::styled(name.to_string(), Style::new().fg(theme::t().dim).bold()),
+                Span::styled(format!("  {detail}"), Style::new().fg(theme::t().dim)),
             ])]
         }
     }

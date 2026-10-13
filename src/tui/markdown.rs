@@ -59,7 +59,7 @@ impl Renderer {
     fn prefixes(&mut self) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
         let mut base = Vec::new();
         for _ in 0..self.quote {
-            base.push(Span::styled("│ ", Style::new().fg(theme::DIM)));
+            base.push(Span::styled("│ ", Style::new().fg(theme::t().dim)));
         }
         let indent = "  ".repeat(self.lists.len().saturating_sub(1));
         if self.lists.is_empty() {
@@ -70,7 +70,7 @@ impl Renderer {
         let marker = self.marker.take();
         let pad = marker.as_ref().map_or(2, |m| m.width());
         first.push(Span::raw(indent.clone()));
-        first.push(Span::styled(marker.unwrap_or_else(|| " ".repeat(pad)), Style::new().fg(theme::DIM)));
+        first.push(Span::styled(marker.unwrap_or_else(|| " ".repeat(pad)), Style::new().fg(theme::t().dim)));
         rest.push(Span::raw(format!("{indent}{}", " ".repeat(pad))));
         (first, rest)
     }
@@ -107,17 +107,17 @@ impl Renderer {
             Event::Start(tag) => self.start(tag),
             Event::End(tag) => self.end(tag),
             Event::Text(t) => self.push(&t, self.style()),
-            Event::Code(t) | Event::InlineMath(t) => self.push(&t, Style::new().fg(theme::CODE)),
-            Event::DisplayMath(t) => self.push(&t, Style::new().fg(theme::CODE)),
-            Event::Html(t) | Event::InlineHtml(t) => self.push(&t, Style::new().fg(theme::DIM)),
+            Event::Code(t) | Event::InlineMath(t) => self.push(&t, Style::new().fg(theme::t().code)),
+            Event::DisplayMath(t) => self.push(&t, Style::new().fg(theme::t().code)),
+            Event::Html(t) | Event::InlineHtml(t) => self.push(&t, Style::new().fg(theme::t().dim)),
             Event::SoftBreak => self.push(" ", Style::new()),
             Event::HardBreak => self.push("\n", Style::new()),
-            Event::TaskListMarker(done) => self.push(if done { "☑ " } else { "☐ " }, Style::new().fg(theme::DIM)),
-            Event::FootnoteReference(r) => self.push(&format!("[{r}]"), Style::new().fg(theme::DIM)),
+            Event::TaskListMarker(done) => self.push(if done { "☑ " } else { "☐ " }, Style::new().fg(theme::t().dim)),
+            Event::FootnoteReference(r) => self.push(&format!("[{r}]"), Style::new().fg(theme::t().dim)),
             Event::Rule => {
                 self.flush();
                 self.gap();
-                self.out.push(Line::styled("─".repeat(self.width.min(40)), Style::new().fg(theme::DIM)));
+                self.out.push(Line::styled("─".repeat(self.width.min(40)), Style::new().fg(theme::t().dim)));
             }
         }
     }
@@ -169,7 +169,7 @@ impl Renderer {
             Tag::Emphasis => self.styles.push(Style::new().add_modifier(Modifier::ITALIC)),
             Tag::Strong => self.styles.push(Style::new().add_modifier(Modifier::BOLD)),
             Tag::Strikethrough => self.styles.push(Style::new().add_modifier(Modifier::CROSSED_OUT)),
-            Tag::Link { .. } => self.styles.push(Style::new().fg(theme::LINK).add_modifier(Modifier::UNDERLINED)),
+            Tag::Link { .. } => self.styles.push(Style::new().fg(theme::t().link).add_modifier(Modifier::UNDERLINED)),
             Tag::Table(_) => {
                 self.flush();
                 self.gap();
@@ -232,7 +232,7 @@ impl Renderer {
 /// `prefix` and a gutter bar.
 fn code_block(lang: &str, code: &str, width: usize, prefix: &[Span<'static>]) -> Vec<Line<'static>> {
     use unicode_width::UnicodeWidthChar;
-    let gutter = Span::styled("▎ ", Style::new().fg(theme::DIM));
+    let gutter = Span::styled("▎ ", Style::new().fg(theme::t().dim));
     let room = width.saturating_sub(prefix.iter().map(|s| s.width()).sum::<usize>() + 2).max(8);
     let start = || prefix.iter().cloned().chain([gutter.clone()]).collect::<Vec<_>>();
     let mut out = Vec::new();
@@ -358,7 +358,7 @@ fn table(t: Table, width: usize) -> Vec<Line<'static>> {
         }
         widths[i] = w - 1;
     }
-    let sep = Span::styled(" │ ", Style::new().fg(theme::DIM));
+    let sep = Span::styled(" │ ", Style::new().fg(theme::t().dim));
     let mut out = Vec::new();
     for (r, row) in t.rows.iter().enumerate() {
         let header = r < t.header_rows;
@@ -373,7 +373,7 @@ fn table(t: Table, width: usize) -> Vec<Line<'static>> {
         out.push(Line::from(spans));
         if header && r + 1 == t.header_rows {
             let rule: Vec<String> = widths.iter().map(|w| "─".repeat(*w)).collect();
-            out.push(Line::styled(rule.join("─┼─"), Style::new().fg(theme::DIM)));
+            out.push(Line::styled(rule.join("─┼─"), Style::new().fg(theme::t().dim)));
         }
     }
     out
