@@ -61,7 +61,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("doctor") => {
-            doctor();
+            tui::doctor();
             Ok(())
         }
         Some("ping") => {
@@ -84,21 +84,5 @@ fn port_arg(args: &[String]) -> Result<u16> {
             Some(p) => Ok(p),
             None => bail!("--port needs a port number"),
         },
-    }
-}
-
-/// Reports terminal image support, run in the terminal in question.
-fn doctor() {
-    ratatui::crossterm::terminal::enable_raw_mode().ok();
-    let images = tui::images::Images::detect();
-    ratatui::crossterm::terminal::disable_raw_mode().ok();
-    match images {
-        Some(im) => println!("{}", im.describe()),
-        None => println!("images: off (AGENTCHAT_IMAGES)"),
-    }
-    for k in ["AGENTCHAT_IMAGES", "TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "WEZTERM_PANE", "WEZTERM_EXECUTABLE", "TMUX", "WSL_DISTRO_NAME", "HERDR_ENV"] {
-        if let Ok(v) = std::env::var(k) {
-            println!("{k}={v}");
-        }
     }
 }

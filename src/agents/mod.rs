@@ -1,7 +1,7 @@
 //! Discovering the running agents.
 
 mod claude;
-mod codex;
+pub mod codex;
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

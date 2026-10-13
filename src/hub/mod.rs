@@ -2,15 +2,21 @@
 //! marks, followed transcripts and sending. Every process works off the same
 //! database, so the TUI and the web UI show the same state.
 
+mod actions;
 pub mod channels;
+mod commands;
 pub mod feed;
 mod watcher;
 
-use crate::agents::{Address, Agent, Kind, Presence};
+pub use actions::Task;
+pub use commands::{help, parse_input, theme_list, Completion, Input};
+
+use crate::agents::{Agent, Kind, Presence};
 use crate::db::{self, Msg};
 use crate::{ipc, theme};
 use crate::transcript::Tail;
 use crate::uploads;
+use commands::completions;
 use anyhow::Result;
 use channels::{Channel, Section};
 use feed::Post;
@@ -20,172 +26,29 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
 const HISTORY: i64 = 3000;
-const STATUS_ASK: &str = "Quick status update please: what are you working on, what's done, \
-                          and is anything blocked? 2-3 lines.";
-pub const HELP: &str = "commands: /status  /new claude|codex [folder] [prompt]  /rename <name> (in a DM)  \
-                        !command (in a DM)  /theme [name]  /sound  /quit";
-
-/// Slash commands: (name, usage after the name, what it does).
-const COMMANDS: [(&str, &str, &str); 6] = [
-    ("/status", "", "ask everyone here for a status update"),
-    ("/new", "claude|codex [folder] [prompt]", "start an agent"),
-    ("/rename", "<name>", "rename this DM's conversation"),
-    ("/theme", "[name]", "switch the theme for every UI"),
-    ("/sound", "", "turn the reply chime on or off"),
-    ("/quit", "", "leave agentchat"),
-];
-
-/// One autocomplete suggestion.
-#[derive(serde::Serialize)]
-pub struct Completion {
-    /// The whole line once accepted.
-    pub line: String,
-    pub label: String,
-    pub detail: String,
-    /// Accepting it is a complete command: run it rather than keep typing.
-    pub run: bool,
-}
-
-/// Suggestions for a composer line starting with `/`: commands, then their
-/// arguments (agent kinds, theme names, folders).
-pub fn completions(line: &str, folders: &[String]) -> Vec<Completion> {
-    let item = |line: String, label: &str, detail: &str, run: bool| Completion {
-        line,
-        label: label.to_string(),
-        detail: detail.to_string(),
-        run,
-    };
-    let Some(rest) = line.strip_prefix('/') else { return Vec::new() };
-    let Some((cmd, arg)) = rest.split_once(' ') else {
-        return COMMANDS
-            .iter()
-            .filter(|(name, ..)| name[1..].starts_with(rest))
-            .map(|(name, usage, what)| {
-                let label = if usage.is_empty() { name.to_string() } else { format!("{name} {usage}") };
-                let line = if usage.is_empty() { name.to_string() } else { format!("{name} ") };
-                item(line, &label, what, usage.is_empty())
-            })
-            .collect();
-    };
-    match cmd {
-        "theme" => theme::names()
-            .into_iter()
-            .filter(|n| n.starts_with(arg.trim()) && *n != arg.trim())
-            .map(|n| item(format!("/theme {n}"), n, if n == theme::t().name { "current" } else { "" }, true))
-            .collect(),
-        "new" => match arg.split_once(' ') {
-            None => ["claude", "codex"]
-                .into_iter()
-                .filter(|k| k.starts_with(arg) && *k != arg)
-                .map(|k| item(format!("/new {k} "), k, "then a folder and a first message, both optional", false))
-                .collect(),
-            Some((kind, folder)) if folder.starts_with(['~', '/', '.']) && !folder.contains(' ') => {
-                let home = db::home().display().to_string();
-                folders
-                    .iter()
-                    .map(|f| f.replacen(&home, "~", 1))
-                    .filter(|f| f.starts_with(folder) && f != folder)
-                    .take(12)
-                    .map(|f| item(format!("/new {kind} {f} "), &f, "", false))
-                    .collect()
-            }
-            Some(_) => Vec::new(),
-        },
-        _ => Vec::new(),
-    }
-}
-
-/// What the user typed in a composer.
-pub enum Input {
-    Send(String),
-    /// `/new claude|codex [folder] <prompt>`: start an agent.
-    New { kind: Kind, folder: Option<String>, prompt: String },
-    /// `!command`: run it in a DM's agent's folder.
-    Shell(String),
-    /// `/rename <name>`: rename a DM's conversation.
-    Rename(String),
-    /// `/theme name`, or `/theme` alone to list them.
-    Theme(Option<String>),
-    ToggleSound,
-    Quit,
-    Help,
-}
-
-pub fn parse_input(text: &str) -> Option<Input> {
-    let text = text.trim();
-    if let Some(cmd) = text.strip_prefix('!') {
-        return (!cmd.trim().is_empty()).then(|| Input::Shell(cmd.trim().to_string()));
-    }
-    if let Some(name) = text.strip_prefix("/rename") {
-        let name = name.trim();
-        return Some(if name.is_empty() { Input::Help } else { Input::Rename(name.to_string()) });
-    }
-    if let Some(rest) = text.strip_prefix("/new ") {
-        let (kind, rest) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
-        let kind = match kind {
-            "claude" => Kind::Claude,
-            "codex" => Kind::Codex,
-            _ => return Some(Input::Help),
-        };
-        let rest = rest.trim();
-        let (folder, prompt) = match rest.split_once(' ') {
-            Some((f, p)) if f.starts_with(['/', '~', '.']) => (Some(f.to_string()), p.trim()),
-            _ if rest.starts_with(['/', '~', '.']) => (Some(rest.to_string()), ""),
-            _ => (None, rest),
-        };
-        return Some(Input::New { kind, folder, prompt: prompt.to_string() });
-    }
-    if let Some(rest) = text.strip_prefix("/theme") {
-        let name = rest.trim();
-        return Some(Input::Theme((!name.is_empty()).then(|| name.to_string())));
-    }
-    Some(match text {
-        "" => return None,
-        "/quit" | "/q" => Input::Quit,
-        "/sound" => Input::ToggleSound,
-        "/status" => Input::Send(STATUS_ASK.into()),
-        t if t.starts_with('/') => Input::Help,
-        t => Input::Send(t.into()),
-    })
-}
-
-/// The `/theme` reply: the themes, the active one marked.
-pub fn theme_list() -> String {
-    let names: Vec<String> = theme::names()
-        .into_iter()
-        .map(|n| if n == theme::t().name { format!("[{n}]") } else { n.to_string() })
-        .collect();
-    format!("themes: {}", names.join(" "))
-}
-
 /// A message logged and ready to deliver: run [`Delivery::run`] off the UI thread.
 pub struct Delivery {
-    pub targets: Vec<Agent>,
+    targets: Vec<Agent>,
     text: String,
     images: Vec<PathBuf>,
 }
 
 impl Delivery {
+    /// How many agents it goes to.
+    pub fn len(&self) -> usize {
+        self.targets.len()
+    }
+
     pub fn run(&self) -> ipc::Report {
         ipc::deliver(&self.targets, &self.text, &self.images)
-    }
-}
-
-/// Work to run off the UI thread (starting an agent, running a command);
-/// returns a one-line note for the UI.
-pub struct Task(Box<dyn FnOnce() -> String + Send>);
-
-impl Task {
-    pub fn run(self) -> String {
-        (self.0)()
     }
 }
 
 pub struct Hub {
     conn: Connection,
     pub me: String,
-    pub msgs: Vec<Msg>,
-    pub last_id: i64,
+    msgs: Vec<Msg>,
+    last_id: i64,
     pub agents: Vec<Agent>,
     pub channels: Vec<Channel>,
     seen: HashMap<String, i64>,
@@ -351,14 +214,30 @@ impl Hub {
         (chan.section == Section::Direct).then(|| self.members(chan).first()?.title.clone()).flatten()
     }
 
+    /// What an empty channel says.
+    pub fn empty_hint(&self, chan: &Channel) -> String {
+        match chan.section {
+            Section::Direct => format!("Nothing from {} yet.", chan.name()),
+            _ => format!("This is the start of {}. Type /status to ask everyone here for an update.", chan.title()),
+        }
+    }
+
+    /// The composer's hint, in message or shell mode.
+    pub fn placeholder(&self, chan: &Channel, shell: bool) -> String {
+        match (shell, chan.agent()) {
+            (false, _) => format!("Message {} · ! for shell", chan.title()),
+            (true, Some(agent)) => format!("Shell command for {agent} · Backspace to leave"),
+            (true, None) => "Shell commands run in a DM · Backspace to leave".into(),
+        }
+    }
+
     /// The line under the channel title.
     pub fn detail(&self, chan: &Channel) -> String {
         let members = self.members(chan);
         if chan.section == Section::Direct {
             return match members.first() {
                 Some(a) => {
-                    let home = db::home().display().to_string();
-                    format!("{} · {} · {}", a.kind.as_str(), a.presence.label(), a.cwd.replacen(&home, "~", 1))
+                    format!("{} · {} · {}", a.kind.as_str(), a.presence.label(), db::tilde(&a.cwd))
                 }
                 None => "offline".into(),
             };
@@ -401,204 +280,6 @@ impl Hub {
         completions(line, &folders)
     }
 
-    /// Folders to offer for new agents: the agents' own, plus the projects
-    /// Claude has been trusted in (read from its config, never written).
-    pub fn folders(&self) -> Vec<String> {
-        let mut out: Vec<String> = self.agents.iter().map(|a| a.cwd.clone()).collect();
-        let config = std::fs::read_to_string(db::home().join(".claude.json")).unwrap_or_default();
-        let config: serde_json::Value = serde_json::from_str(&config).unwrap_or_default();
-        if let Some(projects) = config.get("projects").and_then(serde_json::Value::as_object) {
-            let trusted = projects.iter().filter(|(_, p)| p.get("hasTrustDialogAccepted") == Some(&true.into()));
-            out.extend(trusted.map(|(path, _)| path.clone()));
-        }
-        out.retain(|f| !f.is_empty() && std::path::Path::new(f).is_dir());
-        out.sort();
-        out.dedup();
-        out
-    }
 
-    /// The folder for a new agent: the given one, else the DM agent's or the
-    /// project channel's folder.
-    fn folder(&self, chan: &Channel, given: Option<&str>) -> Result<PathBuf> {
-        let path = match given {
-            Some(f) => match f.strip_prefix('~') {
-                Some(rest) => PathBuf::from(format!("{}{rest}", db::home().display())),
-                None => PathBuf::from(f),
-            },
-            None => match self.members(chan).first() {
-                Some(a) if chan.section != Section::Top => PathBuf::from(&a.cwd),
-                _ => anyhow::bail!("say which folder: /new claude ~/code/project <prompt>"),
-            },
-        };
-        anyhow::ensure!(path.is_dir(), "no folder {}", path.display());
-        Ok(path)
-    }
-
-    /// Starts a Claude (background session) or Codex (app-server thread)
-    /// agent, with a first prompt or idle. Its DM appears once discovery finds it.
-    pub fn start_agent(&self, chan_id: &str, kind: Kind, folder: Option<&str>, prompt: &str) -> Result<Task> {
-        let chan = self.channel(chan_id).ok_or_else(|| anyhow::anyhow!("no channel"))?;
-        let cwd = self.folder(chan, folder)?;
-        let prompt = prompt.trim().to_string();
-        Ok(Task(Box::new(move || {
-            let shown = cwd.display().to_string().replace(&db::home().display().to_string(), "~");
-            let started = match kind {
-                Kind::Claude => ipc::claude::start(&cwd, &prompt).map(|id| format!("claude {id}")),
-                Kind::Codex => ipc::codex::AppServer::connect().and_then(|mut s| {
-                    let thread = s.start_thread(&cwd)?;
-                    if !prompt.is_empty() {
-                        s.start_turn(&thread, &prompt, &[])?;
-                    }
-                    Ok("codex".to_string())
-                }),
-            };
-            match started {
-                Ok(what) => format!("started {what} in {shown}; it'll appear under Direct messages"),
-                Err(e) => format!("couldn't start {}: {e}", kind.as_str()),
-            }
-        })))
-    }
-
-    /// The online agent behind a DM, for commands aimed at one agent.
-    fn dm_agent(&self, chan_id: &str, what: &str) -> Result<Agent> {
-        let chan = self.channel(chan_id).ok_or_else(|| anyhow::anyhow!("no channel"))?;
-        match (chan.section, self.members(chan).first()) {
-            (Section::Direct, Some(a)) if a.presence != Presence::Away => Ok((*a).clone()),
-            _ => anyhow::bail!("{what} works in a DM with an online agent"),
-        }
-    }
-
-    /// Renames a DM's conversation, as `/rename` does in the agent: a Claude
-    /// session takes the new name (so its DM moves to the returned channel), a
-    /// Codex thread gets it as its title.
-    pub fn rename(&self, chan_id: &str, name: &str) -> Result<(Task, String)> {
-        let agent = self.dm_agent(chan_id, "/rename")?;
-        let follow = match agent.address {
-            Address::Claude(_) => format!("dm:{name}"),
-            Address::Codex(_) => chan_id.to_string(),
-        };
-        let name = name.to_string();
-        let task = Task(Box::new(move || {
-            let done = match &agent.address {
-                Address::Claude(pid) => ipc::claude::rename(*pid, &name),
-                Address::Codex(thread) => ipc::codex::AppServer::connect().and_then(|mut s| s.rename(thread, &name)),
-            };
-            match done {
-                Ok(()) => format!("renamed {} to {name}", agent.name),
-                Err(e) => format!("couldn't rename: {e}"),
-            }
-        }));
-        Ok((task, follow))
-    }
-
-    /// Runs a command for a DM's agent, like `!` in its own terminal. Codex
-    /// runs it in the thread's shell and records it there; for Claude,
-    /// agentchat runs it in the agent's folder and sends the output to it.
-    pub fn shell(&self, chan_id: &str, command: &str) -> Result<Task> {
-        let agent = self.dm_agent(chan_id, "!command")?;
-        let (command, me) = (command.to_string(), self.me.clone());
-        Ok(Task(Box::new(move || {
-            let done = match &agent.address {
-                Address::Codex(thread) => {
-                    ipc::codex::AppServer::connect().and_then(|mut s| s.shell_command(thread, &command))
-                }
-                Address::Claude(pid) => {
-                    let (output, exit) = run_shell(&command, &agent.cwd);
-                    let report = ipc::shell_report(&command, &output, exit);
-                    ipc::claude::send(*pid, &ipc::compose(&me, None, &report, &[]))
-                }
-            };
-            match done {
-                Ok(()) => format!("ran in {}", agent.name),
-                Err(e) => format!("couldn't run: {e}"),
-            }
-        })))
-    }
 }
 
-/// Output cap for `!` commands, from the end.
-const SHELL_OUTPUT: usize = 16_000;
-const SHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
-
-/// Runs a command with the user's shell in `cwd`: (stdout and stderr, exit
-/// code; None if it didn't finish within the timeout, when its whole process
-/// group is killed).
-fn run_shell(command: &str, cwd: &str) -> (String, Option<i32>) {
-    use std::io::Read;
-    use std::os::unix::process::CommandExt;
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-    let child = std::process::Command::new(shell)
-        .args(["-lc", command])
-        .current_dir(cwd)
-        .process_group(0)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn();
-    let mut child = match child {
-        Ok(c) => c,
-        Err(e) => return (e.to_string(), None),
-    };
-    // Drain both pipes on their own threads so a chatty command can't block.
-    let drain = |pipe: Option<Box<dyn Read + Send>>| {
-        std::thread::spawn(move || {
-            let mut out = Vec::new();
-            if let Some(mut p) = pipe {
-                let _ = p.read_to_end(&mut out);
-            }
-            out
-        })
-    };
-    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let deadline = std::time::Instant::now() + SHELL_TIMEOUT;
-    let exit = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.code(),
-            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
-            _ => {
-                if let Some(pid) = rustix::process::Pid::from_raw(child.id() as i32) {
-                    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::Kill);
-                }
-                let _ = child.wait();
-                break None;
-            }
-        }
-    };
-    let mut text = String::from_utf8_lossy(&stdout.join().unwrap_or_default()).to_string();
-    text.push_str(&String::from_utf8_lossy(&stderr.join().unwrap_or_default()));
-    if exit.is_none() {
-        text.push_str(&format!("\n(killed after {}s)", SHELL_TIMEOUT.as_secs()));
-    }
-    let start = text.char_indices().rev().nth(SHELL_OUTPUT).map_or(0, |(i, _)| i);
-    (text[start..].to_string(), exit)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{parse_input, Input};
-    use crate::agents::Kind;
-
-    #[test]
-    fn completes_commands_and_arguments() {
-        use super::completions;
-        let labels = |line: &str| completions(line, &["/home/x/code/api".into()]).into_iter().map(|c| c.line).collect::<Vec<_>>();
-        assert_eq!(labels("/s"), ["/status", "/sound"]);
-        assert_eq!(labels("/re"), ["/rename "]);
-        assert_eq!(labels("/new c"), ["/new claude ", "/new codex "]);
-        assert_eq!(labels("/theme dra"), ["/theme dracula"]);
-        assert!(labels("hello").is_empty());
-    }
-
-    #[test]
-    fn parses_new_and_shell() {
-        match parse_input("/new codex ~/code/infra fix the CI") {
-            Some(Input::New { kind: Kind::Codex, folder: Some(f), prompt }) => {
-                assert_eq!((f.as_str(), prompt.as_str()), ("~/code/infra", "fix the CI"))
-            }
-            _ => panic!("expected /new with a folder"),
-        }
-        assert!(matches!(parse_input("/new claude look around"), Some(Input::New { folder: None, .. })));
-        assert!(matches!(parse_input("!git status"), Some(Input::Shell(c)) if c == "git status"));
-    }
-}

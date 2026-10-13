@@ -1,5 +1,6 @@
-//! Syntax highlighting shared by both UIs: one syntect setup and theme,
-//! producing colored tokens that the TUI turns into spans and the web into HTML.
+//! Markdown parsing and syntax highlighting shared by both UIs: one parser
+//! setup and one syntect theme, producing events and colored tokens that the
+//! TUI turns into spans and the web into HTML.
 
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
@@ -8,6 +9,20 @@ use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 
 pub type Rgb = (u8, u8, u8);
+
+/// Agent markdown, with the extensions agents use (tables, ~~, task lists).
+pub fn markdown(text: &str) -> pulldown_cmark::Parser<'_> {
+    use pulldown_cmark::Options;
+    pulldown_cmark::Parser::new_ext(text, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS)
+}
+
+/// A code block's language: the first word of its fence info.
+pub fn fence_lang(kind: &pulldown_cmark::CodeBlockKind) -> String {
+    match kind {
+        pulldown_cmark::CodeBlockKind::Fenced(info) => info.split_whitespace().next().unwrap_or("").to_string(),
+        pulldown_cmark::CodeBlockKind::Indented => String::new(),
+    }
+}
 
 fn assets() -> &'static (SyntaxSet, ThemeSet) {
     static ASSETS: OnceLock<(SyntaxSet, ThemeSet)> = OnceLock::new();

@@ -2,15 +2,14 @@
 //! code, lists, task lists, quotes, rules, tables and highlighted code blocks.
 
 use crate::{highlight, theme};
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, HeadingLevel, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 pub fn render(text: &str, width: usize) -> Vec<Line<'static>> {
-    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let mut r = Renderer { width: width.max(16), ..Renderer::default() };
-    for ev in Parser::new_ext(text, opts) {
+    for ev in highlight::markdown(text) {
         r.event(ev);
     }
     r.flush();
@@ -142,11 +141,7 @@ impl Renderer {
             Tag::CodeBlock(kind) => {
                 self.flush();
                 self.gap();
-                let lang = match kind {
-                    CodeBlockKind::Fenced(info) => info.split_whitespace().next().unwrap_or("").to_string(),
-                    CodeBlockKind::Indented => String::new(),
-                };
-                self.code = Some((lang, String::new()));
+                self.code = Some((highlight::fence_lang(&kind), String::new()));
             }
             Tag::List(start) => {
                 self.flush();

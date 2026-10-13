@@ -216,6 +216,11 @@ fn handle(mut req: Request, shared: &Shared) {
         },
         (Method::Get, "/api/ping") => respond_json(req, json!({ "ok": true })),
         (Method::Get, "/api/state") => respond_json(req, state(shared)),
+        (Method::Get, "/api/folders") => {
+            let folders = shared.hub.lock().unwrap().folders();
+            let list: Vec<Value> = folders.iter().map(|f| json!({ "path": f, "label": db::tilde(f) })).collect();
+            respond_json(req, json!(list))
+        }
         (Method::Get, "/api/complete") => {
             let list = shared.hub.lock().unwrap().complete(&arg("text").unwrap_or_default());
             respond_json(req, json!(list))
@@ -230,13 +235,8 @@ fn handle(mut req: Request, shared: &Shared) {
         }
         (Method::Post, "/api/new") => {
             let kind = crate::agents::Kind::parse(&arg("kind").unwrap_or_default());
-            let task = shared.hub.lock().unwrap().start_agent(
-                &arg("channel").unwrap_or_default(),
-                kind,
-                arg("folder").as_deref(),
-                &arg("prompt").unwrap_or_default(),
-            );
-            respond_json(req, json!({ "note": task.map_or_else(|e| e.to_string(), hub::Task::run) }))
+            let v = start_agent(shared, &arg("channel").unwrap_or_default(), kind, arg("folder").as_deref(), &arg("prompt").unwrap_or_default());
+            respond_json(req, v)
         }
         (Method::Post, "/api/theme") => {
             let v = set_theme(shared, &arg("name").unwrap_or_default());
@@ -311,6 +311,10 @@ fn state(shared: &Shared) -> Value {
                 "members": hub.members(c).len(),
                 "detail": hub.detail(c),
                 "headline": hub.headline(c),
+                "placeholder": hub.placeholder(c, false),
+                "placeholder_shell": hub.placeholder(c, true),
+                "empty": hub.empty_hint(c),
+                "folder": hub.default_folder(c),
             })
         })
         .collect();
@@ -320,11 +324,10 @@ fn state(shared: &Shared) -> Value {
         "ready": !hub.agents.is_empty(),
         "channels": channels,
         "statuses": hub.last_statuses(),
-        "help": hub::HELP,
+        "help": hub::help(),
         "theme": theme::t().name,
         "themes": theme::names(),
-        "folders": hub.folders(),
-        "home": db::home(),
+
     })
 }
 
@@ -349,10 +352,9 @@ fn feed(shared: &Shared, channel: &str, v: Option<&str>) -> Value {
                 Body::Markdown { text, clamp } => {
                     let key = format!("{}:{}", theme::t().name, p.key); // code colors follow the theme
                     let html = cache.entry(key).or_insert_with(|| render::markdown(text)).clone();
-                    let clamp = match clamp {
-                        Clamp::Off => Value::Null,
-                        Clamp::ToDm => json!("dm"),
-                        Clamp::Expand => json!("expand"),
+                    let clamp = match clamp.hint() {
+                        None => Value::Null,
+                        Some(hint) => json!({ "to_dm": *clamp == Clamp::ToDm, "hint": hint }),
                     };
                     (Some(html), Value::Null, clamp)
                 }
@@ -385,12 +387,9 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
     let body = match hub::parse_input(text) {
         Some(Input::Send(body)) => body,
         None if !files.is_empty() => String::new(),
-        Some(Input::Help) => return json!({ "note": hub::HELP }),
+        Some(Input::Help) => return json!({ "note": hub::help() }),
         Some(Input::Theme(None)) => return json!({ "note": hub::theme_list() }),
-        Some(Input::New { kind, folder, prompt }) => {
-            let task = shared.hub.lock().unwrap().start_agent(channel, kind, folder.as_deref(), &prompt);
-            return json!({ "note": task.map_or_else(|e| e.to_string(), hub::Task::run) });
-        }
+        Some(Input::New { kind, folder, prompt }) => return start_agent(shared, channel, kind, folder.as_deref(), &prompt),
         Some(Input::Rename(name)) => {
             let renamed = shared.hub.lock().unwrap().rename(channel, &name); // run outside the lock
             return match renamed {
@@ -400,7 +399,7 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
         }
         Some(Input::Shell(cmd)) => {
             let task = shared.hub.lock().unwrap().shell(channel, &cmd);
-            return json!({ "note": task.map_or_else(|e| e.to_string(), hub::Task::run) });
+            return run_task(task);
         }
         Some(Input::Theme(Some(name))) => return set_theme(shared, &name),
         _ => return json!({}),
@@ -415,6 +414,16 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
             json!({ "delivered": report.delivered, "note": report.note() })
         }
     }
+}
+
+/// Runs a hub task here, outside the hub's lock, for its note.
+fn run_task(task: Result<hub::Task>) -> Value {
+    json!({ "note": task.map_or_else(|e| e.to_string(), hub::Task::run) })
+}
+
+fn start_agent(shared: &Shared, channel: &str, kind: crate::agents::Kind, folder: Option<&str>, prompt: &str) -> Value {
+    let task = shared.hub.lock().unwrap().start_agent(channel, kind, folder, prompt);
+    run_task(task)
 }
 
 fn set_theme(shared: &Shared, name: &str) -> Value {

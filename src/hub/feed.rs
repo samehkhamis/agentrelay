@@ -7,7 +7,7 @@ use crate::db::Msg;
 use crate::transcript::{Entry, Item, Tail};
 use chrono::{Local, TimeZone};
 
-pub const STATUS_NOTE: &str = "↻ latest reply";
+const STATUS_NOTE: &str = "↻ latest reply";
 /// Status channels show this many lines of a reply before cutting it.
 pub const STATUS_LINES: usize = 8;
 const LIMIT: usize = 400;
@@ -21,6 +21,17 @@ pub enum Clamp {
     ToDm,
     /// A subagent's reply: expands in place.
     Expand,
+}
+
+impl Clamp {
+    /// What the cut says, in both UIs.
+    pub fn hint(self) -> Option<&'static str> {
+        match self {
+            Clamp::Off => None,
+            Clamp::ToDm => Some("… open the DM for the full reply"),
+            Clamp::Expand => Some("… show more"),
+        }
+    }
 }
 
 pub enum Body<'a> {

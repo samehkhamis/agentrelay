@@ -3,7 +3,6 @@
 //! description); Codex records spawned threads in `thread_spawn_edges`.
 
 use crate::agents::Kind;
-use crate::db::home;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -51,9 +50,8 @@ fn claude(main: &Path) -> Vec<(PathBuf, String)> {
 fn codex(main: &Path) -> Vec<(PathBuf, String)> {
     let stem = main.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let parent = &stem[stem.len().saturating_sub(36)..];
-    let db = home().join(".codex/state_5.sqlite");
     let query = || -> rusqlite::Result<Vec<(PathBuf, String)>> {
-        let conn = rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let conn = crate::agents::codex::state_db()?;
         let mut st = conn.prepare(
             "SELECT t.rollout_path, COALESCE(t.agent_nickname, t.name, t.title) FROM thread_spawn_edges e
              JOIN threads t ON t.id = e.child_thread_id WHERE e.parent_thread_id = ?1",

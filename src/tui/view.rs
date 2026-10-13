@@ -168,7 +168,7 @@ impl App {
         let chan = self.current().clone();
         let posts = self.hub.posts(&chan);
         let (mut lines, slots) = if posts.is_empty() {
-            (vec![Line::default(), Line::styled(empty_hint(&chan), Style::new().fg(theme::t().dim))], Vec::new())
+            (vec![Line::default(), Line::styled(format!(" {}", self.hub.empty_hint(&chan)), Style::new().fg(theme::t().dim))], Vec::new())
         } else {
             feed::layout(&posts, area.width.saturating_sub(1) as usize, &mut self.cache, self.images.as_mut())
         };
@@ -218,11 +218,7 @@ impl App {
         }
         let text_area = Rect { x: inner.x + marker, width: inner.width.saturating_sub(marker), ..inner };
         let (shown, cursor) = self.editor.view(text_area.width as usize);
-        let hint = match (shell, self.current().agent()) {
-            (true, Some(agent)) => format!("Shell command for {agent} · Backspace to leave"),
-            (true, None) => "Shell commands run in a DM · Backspace to leave".into(),
-            (false, _) => format!("Message {} · ! for shell", self.current().title()),
-        };
+        let hint = self.hub.placeholder(self.current(), shell);
         let para = if shown.is_empty() {
             Paragraph::new(Span::styled(hint, Style::new().fg(th.dim)))
         } else {
@@ -269,12 +265,5 @@ impl App {
             .style(Style::new().bg(th.bg).fg(th.fg));
         f.render_widget(Clear, area);
         f.render_widget(Paragraph::new(rows).block(block), area);
-    }
-}
-
-fn empty_hint(chan: &Channel) -> String {
-    match chan.section {
-        Section::Direct => format!(" Nothing from {} yet.", chan.name()),
-        _ => format!(" This is the start of {}. Type /status to ask everyone here for an update.", chan.title()),
     }
 }

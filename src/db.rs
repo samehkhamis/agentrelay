@@ -14,7 +14,7 @@ pub struct Msg {
     /// `all`, `claude`, `codex`, a project group like `webapp`, or `dm:<agent>`.
     pub channel: String,
     pub sender: String,
-    /// `user`, `claude`, `codex` or `system`.
+    /// `user`, `claude` or `codex`.
     pub sender_kind: String,
     /// `chat` for posted messages, `status` for an agent's latest transcript reply.
     pub kind: String,
@@ -25,6 +25,23 @@ pub struct Msg {
 
 pub fn home() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+}
+
+/// `/home/me/code/x` -> `~/code/x`, for display.
+pub fn tilde(path: &str) -> String {
+    let home = home().display().to_string();
+    match path.strip_prefix(&home) {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => format!("~{rest}"),
+        _ => path.to_string(),
+    }
+}
+
+/// `~/code/x` -> `/home/me/code/x`.
+pub fn expand_tilde(path: &str) -> PathBuf {
+    match path.strip_prefix('~') {
+        Some(rest) => PathBuf::from(format!("{}{rest}", home().display())),
+        None => PathBuf::from(path),
+    }
 }
 
 pub fn db_path() -> PathBuf {

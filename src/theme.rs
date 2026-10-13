@@ -35,7 +35,7 @@ const fn rgb(hex: u32) -> Color {
     Color::Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
-pub static THEMES: [Theme; 8] = [
+static THEMES: [Theme; 8] = [
     Theme {
         name: "slack",
         bg: rgb(0x1a1d21),

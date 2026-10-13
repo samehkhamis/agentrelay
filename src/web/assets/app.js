@@ -132,7 +132,7 @@ function renderSidebar() {
       const head = el("div", "section", `▾ ${SECTIONS[section]}`);
       if (section === "direct") {
         const add = el("button", "add", "＋");
-        Object.assign(add, { type: "button", title: "Start an agent: /new claude|codex [folder] <prompt>" });
+        Object.assign(add, { type: "button", title: "Start an agent: /new claude|codex [folder] [prompt]" });
         add.onclick = () => {
           document.body.classList.remove("drawer");
           openNewAgent();
@@ -188,13 +188,7 @@ function renderFeed(posts) {
   const feed = $("feed");
   const stick = atBottom() || !feed.childElementCount;
   const nodes = posts.map(renderPost).flat();
-  if (!posts.length) {
-    const c = channel(current);
-    const hint = c?.section === "direct"
-      ? `Nothing from ${c.name} yet.`
-      : `This is the start of ${c?.title ?? "this channel"}. Type /status to ask everyone here for an update.`;
-    nodes.push(el("div", "empty", hint));
-  }
+  if (!posts.length) nodes.push(el("div", "empty", channel(current)?.empty ?? ""));
   feed.replaceChildren(...nodes);
   for (const body of feed.querySelectorAll(".body.clamp")) {
     body.classList.toggle("overflowing", body.scrollHeight > body.clientHeight + 2);
@@ -231,13 +225,11 @@ function renderPost(p) {
     body.innerHTML = p.html; // rendered and sanitized by the server
     for (const a of body.querySelectorAll("a")) Object.assign(a, { target: "_blank", rel: "noopener noreferrer" });
     post.append(body);
-    if (p.clamp === "dm") {
-      const more = el("span", "more", "… open the DM for the full reply");
-      more.onclick = () => select(`dm:${p.author}`);
-      post.append(more);
-    } else if (p.clamp === "expand") {
-      const more = el("span", "more", "Show more");
-      more.onclick = () => body.classList.remove("clamp", "overflowing");
+    if (p.clamp) {
+      const more = el("span", "more", p.clamp.hint);
+      more.onclick = p.clamp.to_dm
+        ? () => select(`dm:${p.author}`)
+        : () => body.classList.remove("clamp", "overflowing");
       post.append(more);
     }
   }
@@ -437,27 +429,15 @@ function setShell(on) {
 
 function setPlaceholder() {
   const c = channel(current);
-  if (!c) return;
-  $("input").placeholder = !shell
-    ? `Message ${c.title} · ! for shell`
-    : c.section === "direct"
-      ? `Shell command for ${c.name} · Backspace to leave`
-      : "Shell commands run in a DM · Backspace to leave";
+  if (c) $("input").placeholder = shell ? c.placeholder_shell : c.placeholder;
 }
 
 // ---------------------------------------------------------------- new agent
 
-function tilde(path) {
-  return state.home && path.startsWith(state.home) ? `~${path.slice(state.home.length)}` : path;
-}
-
-function openNewAgent() {
-  const c = channel(current);
-  // Default to the open DM's or project's folder.
-  const here = c?.section === "direct" || c?.section === "projects"
-    ? state.folders.find((f) => f.split("/").pop() === (c.section === "projects" ? c.name : c.name.replace(/-[0-9a-f]{2,6}$/, "")))
-    : null;
-  $("new-folder").replaceChildren(...state.folders.map((f) => Object.assign(el("option", "", tilde(f)), { value: f })));
+async function openNewAgent() {
+  const folders = await api("/api/folders");
+  $("new-folder").replaceChildren(...folders.map((f) => Object.assign(el("option", "", f.label), { value: f.path })));
+  const here = channel(current)?.folder; // the open DM's or project's folder
   if (here) $("new-folder").value = here;
   $("new-prompt").value = "";
   $("new-agent").showModal();
@@ -477,6 +457,7 @@ $("new-form").onsubmit = async (e) => {
 
 $("menu").onclick = () => document.body.classList.toggle("drawer");
 $("backdrop").onclick = () => document.body.classList.remove("drawer");
+
 
 function autosize() {
   const input = $("input");

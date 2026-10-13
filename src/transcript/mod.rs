@@ -1,10 +1,12 @@
 //! Reading agent transcripts: Claude Code's session JSONL and Codex rollouts,
 //! both parsed into the same [`Entry`] stream, plus their subagents'.
 
-pub mod claude;
-pub mod codex;
+mod claude;
+mod codex;
 mod images;
 mod subagents;
+
+pub use codex::turn_open;
 
 use crate::agents::Kind;
 use serde_json::Value;

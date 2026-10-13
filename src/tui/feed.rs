@@ -2,7 +2,7 @@
 
 use super::images::Images;
 use super::markdown;
-use crate::hub::feed::{self, Body, Clamp, Post};
+use crate::hub::feed::{self, Body, Post};
 use crate::{theme, uploads};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -106,12 +106,7 @@ fn render_body(body: &Body, width: usize) -> Vec<Line<'static>> {
     match body {
         Body::Markdown { text, clamp } => {
             let mut lines = markdown::render(text, width);
-            let hint = match clamp {
-                Clamp::Off => None,
-                Clamp::ToDm => Some("… open the DM for the full reply"),
-                Clamp::Expand => Some("… (subagent reply, cut short)"),
-            };
-            if let Some(hint) = hint.filter(|_| lines.len() > feed::STATUS_LINES) {
+            if let Some(hint) = clamp.hint().filter(|_| lines.len() > feed::STATUS_LINES) {
                 lines.truncate(feed::STATUS_LINES);
                 lines.push(Line::styled(hint, Style::new().fg(theme::t().dim).italic()));
             }

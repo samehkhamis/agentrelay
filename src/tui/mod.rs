@@ -6,7 +6,7 @@
 
 mod editor;
 mod feed;
-pub mod images;
+mod images;
 mod markdown;
 mod paste;
 mod view;
@@ -214,7 +214,7 @@ impl App {
                 self.background(task, "running…".into());
             }
             Some(Input::Quit) => self.quit = true,
-            Some(Input::Help) => self.notify(hub::HELP),
+            Some(Input::Help) => self.notify(hub::help()),
             Some(Input::Theme(None)) => self.notify(hub::theme_list()),
             Some(Input::Theme(Some(name))) => match self.hub.set_theme(&name)? {
                 true => self.notify(format!("theme: {name}")),
@@ -258,7 +258,7 @@ impl App {
         match self.hub.send(&self.selected.clone(), &body, &files)? {
             None => self.notify("nobody online here to deliver to"),
             Some(delivery) => {
-                self.notify(format!("delivering to {}…", delivery.targets.len()));
+                self.notify(format!("delivering to {}…", delivery.len()));
                 let tx = self.done_tx.clone();
                 std::thread::spawn(move || {
                     let _ = tx.send(Done::Delivered(delivery.run()));
@@ -371,6 +371,22 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// Reports terminal image support, run in the terminal in question.
+pub fn doctor() {
+    ratatui::crossterm::terminal::enable_raw_mode().ok();
+    let images = images::Images::detect();
+    ratatui::crossterm::terminal::disable_raw_mode().ok();
+    match images {
+        Some(im) => println!("{}", im.describe()),
+        None => println!("images: off (AGENTCHAT_IMAGES)"),
+    }
+    for k in ["AGENTCHAT_IMAGES", "TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "WEZTERM_PANE", "WEZTERM_EXECUTABLE", "TMUX", "WSL_DISTRO_NAME", "HERDR_ENV"] {
+        if let Ok(v) = std::env::var(k) {
+            println!("{k}={v}");
         }
     }
 }

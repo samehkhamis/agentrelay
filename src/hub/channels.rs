@@ -5,7 +5,7 @@ use crate::agents::{group_of, Agent, Kind, Presence};
 use crate::db::{self, Msg};
 use std::collections::BTreeSet;
 
-pub const TOP: [&str; 3] = ["all", "claude", "codex"];
+const TOP: [&str; 3] = ["all", "claude", "codex"];
 
 #[derive(Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]

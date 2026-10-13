@@ -3,21 +3,14 @@
 //! and only http(s)/mailto links survive, since the page can send prompts.
 
 use crate::highlight;
-use pulldown_cmark::{html, CodeBlockKind, CowStr, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{html, CowStr, Event, Tag, TagEnd};
 
 pub fn markdown(text: &str) -> String {
-    let opts = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let mut events = Vec::new();
     let mut code: Option<(String, String)> = None;
-    for ev in Parser::new_ext(text, opts) {
+    for ev in highlight::markdown(text) {
         match (&mut code, ev) {
-            (None, Event::Start(Tag::CodeBlock(kind))) => {
-                let lang = match kind {
-                    CodeBlockKind::Fenced(info) => info.split_whitespace().next().unwrap_or("").to_string(),
-                    CodeBlockKind::Indented => String::new(),
-                };
-                code = Some((lang, String::new()));
-            }
+            (None, Event::Start(Tag::CodeBlock(kind))) => code = Some((highlight::fence_lang(&kind), String::new())),
             (Some((_, buf)), Event::Text(t)) => buf.push_str(&t),
             (Some(_), Event::End(TagEnd::CodeBlock)) => {
                 let (lang, buf) = code.take().unwrap_or_default();
@@ -53,7 +46,7 @@ fn code_block(lang: &str, code: &str) -> String {
     out
 }
 
-pub fn escape(s: &str) -> String {
+fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {

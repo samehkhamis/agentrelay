@@ -26,7 +26,7 @@ pub fn list() -> Vec<Agent> {
         .map(|t| {
             let presence = if !loaded.contains(&t.id) {
                 Presence::Away
-            } else if transcript::codex::turn_open(&t.rollout) {
+            } else if transcript::turn_open(&t.rollout) {
                 Presence::Busy
             } else {
                 Presence::Online
@@ -52,9 +52,14 @@ fn name(cwd: &str, thread_id: &str) -> String {
     format!("{}-{}", basename(cwd), &id[id.len().saturating_sub(4)..])
 }
 
+/// Codex's thread database, opened read-only.
+pub fn state_db() -> rusqlite::Result<rusqlite::Connection> {
+    let path = home().join(".codex/state_5.sqlite");
+    rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+}
+
 fn threads() -> Result<Vec<Thread>> {
-    let db = home().join(".codex/state_5.sqlite");
-    let conn = rusqlite::Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let conn = state_db()?;
     let mut st = conn.prepare(
         "SELECT id, cwd, COALESCE(name, title), rollout_path, updated_at FROM threads
          WHERE archived = 0 ORDER BY updated_at DESC LIMIT 200",
