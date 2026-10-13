@@ -16,13 +16,15 @@ pub const DIM: Color = Color::Rgb(130, 130, 140);
 pub const CODE: Color = Color::Rgb(232, 145, 45);
 pub const ERROR: Color = Color::Rgb(224, 82, 82);
 pub const LINK: Color = Color::Rgb(97, 175, 239);
+pub const SUBAGENT: Color = Color::Rgb(160, 140, 230);
 
-/// Author color by kind: `claude`, `codex`, `user` or `peer` (another session).
+/// Author color by kind: `claude`, `codex`, `user`, `peer` (another session) or `subagent`.
 pub fn kind_color(kind: &str) -> Color {
     match kind {
         "claude" | "peer" => CLAUDE,
         "codex" => CODEX,
         "user" => USER,
+        "subagent" => SUBAGENT,
         _ => DIM,
     }
 }

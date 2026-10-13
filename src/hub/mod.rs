@@ -186,7 +186,7 @@ impl Hub {
     /// Changes whenever the channel's feed does, so a UI can skip redrawing.
     pub fn version(&self, chan: &Channel) -> String {
         match chan.agent().and_then(|n| self.tails.get(n)) {
-            Some(t) => format!("t{}:{}", t.entries.len(), t.entries.last().map_or("", |e| e.key.as_str())),
+            Some(t) => format!("t{}", t.version()),
             None => format!("m{}", self.last_id),
         }
     }

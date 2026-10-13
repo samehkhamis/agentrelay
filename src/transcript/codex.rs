@@ -1,10 +1,10 @@
 //! Codex rollout lines: `response_item` messages and tool calls.
 
-use super::{display_name, first_string, one_line, parse_ts, prompt, text_of, tail_lines, tool, Entry, Event, Item};
+use super::{display_name, first_string, images, one_line, parse_ts, prompt, text_of, tail_lines, tool, Entry, Event, Item, Opts};
 use serde_json::Value;
 use std::path::Path;
 
-pub(super) fn parse(v: &Value) -> Vec<Event> {
+pub(super) fn parse(v: &Value, opts: Opts) -> Vec<Event> {
     if v.get("type").and_then(Value::as_str) != Some("response_item") {
         return Vec::new();
     }
@@ -17,9 +17,18 @@ pub(super) fn parse(v: &Value) -> Vec<Event> {
         "message" => match field("role") {
             "user" => {
                 let text = text_of(p.get("content"), "input_text");
+                let files: Vec<String> = p
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter(|i| opts.images && i.get("type").and_then(Value::as_str) == Some("input_image"))
+                    .filter_map(|i| images::store_data_url(i.get("image_url")?.as_str()?))
+                    .collect();
                 // Environment context and AGENTS.md come in as user messages too.
                 let injected = text.starts_with('<') || text.starts_with("# AGENTS.md");
-                (!injected && !text.trim().is_empty()).then(|| prompt(key, ts, None, &text))
+                let empty = text.trim().is_empty() && files.is_empty();
+                (!injected && !empty).then(|| prompt(key, ts, None, &text, files))
             }
             "assistant" => {
                 let text = text_of(p.get("content"), "output_text");

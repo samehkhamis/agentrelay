@@ -4,7 +4,7 @@
 use super::channels::{self, Channel};
 use crate::agents::Kind;
 use crate::db::Msg;
-use crate::transcript::{Item, Tail};
+use crate::transcript::{Entry, Item, Tail};
 use chrono::{Local, TimeZone};
 
 pub const STATUS_NOTE: &str = "↻ latest reply";
@@ -13,9 +13,18 @@ pub const STATUS_LINES: usize = 8;
 const LIMIT: usize = 400;
 const GROUP_GAP_MS: i64 = 5 * 60 * 1000;
 
+/// How a long markdown body is cut to [`STATUS_LINES`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Clamp {
+    Off,
+    /// A status update: the full reply is in the agent's DM.
+    ToDm,
+    /// A subagent's reply: expands in place.
+    Expand,
+}
+
 pub enum Body<'a> {
-    /// Markdown; `clamp` cuts it to [`STATUS_LINES`] with a pointer to the DM.
-    Markdown { text: &'a str, clamp: bool },
+    Markdown { text: &'a str, clamp: Clamp },
     /// A one-line tool call.
     Tool { name: &'a str, detail: &'a str, error: bool },
 }
@@ -26,15 +35,15 @@ pub struct Post<'a> {
     /// Unix milliseconds.
     pub ts: i64,
     pub author: &'a str,
-    /// `claude`, `codex`, `user` or `peer` (another session): the author color.
+    /// `claude`, `codex`, `user`, `peer` (another session) or `subagent`: the author color.
     pub author_kind: &'a str,
     /// Shown dim after the author, e.g. `claude`.
     pub tag: Option<&'a str>,
     /// Shown dim after the time, e.g. [`STATUS_NOTE`].
     pub note: Option<&'static str>,
     pub body: Body<'a>,
-    /// Attached files (paths in the uploads directory).
-    pub files: &'a [String],
+    /// Attached files and images (paths).
+    pub files: Vec<&'a str>,
     /// First post of its day: draw a day divider above it.
     pub new_day: bool,
     /// Starts an author group: draw the author header above it.
@@ -55,34 +64,53 @@ pub fn log_posts<'a>(msgs: &'a [Msg], chan: &Channel) -> Vec<Post<'a>> {
             &m.sender_kind,
             (m.sender_kind != "user").then_some(m.sender_kind.as_str()),
             status.then_some(STATUS_NOTE),
-            Body::Markdown { text: &m.body, clamp: status },
+            Body::Markdown { text: &m.body, clamp: if status { Clamp::ToDm } else { Clamp::Off } },
         );
-        p.files = &m.files;
+        p.files = m.files.iter().map(String::as_str).collect();
         p
     });
     arrange(posts.collect())
 }
 
-/// A DM: the agent's transcript, prompts and replies in full, tools as one-liners.
+/// A DM: the agent's transcript, prompts and replies in full, tools as
+/// one-liners, with its subagents' activity merged in by time.
 pub fn transcript_posts<'a>(tail: &'a Tail, agent: &'a str, kind: Kind, me: &'a str) -> Vec<Post<'a>> {
-    let entries = &tail.entries[tail.entries.len().saturating_sub(LIMIT * 2)..];
-    let posts = entries.iter().map(|e| {
-        let key = format!("{agent}:{}", e.key);
-        let by_agent = |body| post(key.clone(), e.ts, agent, kind.as_str(), Some(kind.as_str()), None, body);
-        match &e.item {
-            Item::Prompt { from, text } => {
-                let author_kind = match from {
-                    Some(f) if !f.ends_with("via agentchat") => "peer",
-                    _ => "user",
-                };
-                let author = from.as_deref().unwrap_or(me);
-                post(key.clone(), e.ts, author, author_kind, None, None, Body::Markdown { text, clamp: false })
-            }
-            Item::Reply(text) => by_agent(Body::Markdown { text, clamp: false }),
-            Item::Tool { name, detail, error } => by_agent(Body::Tool { name, detail, error: *error }),
+    let main = tail.entries();
+    let main = &main[main.len().saturating_sub(LIMIT * 2)..];
+    let since = main.first().map_or(0, |e| e.ts);
+    let mut posts: Vec<Post> = main.iter().map(|e| entry_post(e, agent, kind.as_str(), me, false)).collect();
+    for sub in &tail.subs {
+        let entries = sub.entries().filter(|e| e.ts >= since);
+        posts.extend(entries.map(|e| entry_post(e, &sub.label, "subagent", me, true)));
+    }
+    posts.sort_by_key(|p| p.ts);
+    arrange(posts)
+}
+
+fn entry_post<'a>(e: &'a Entry, author: &'a str, kind: &'a str, me: &'a str, sub: bool) -> Post<'a> {
+    let key = format!("{author}:{}", e.key);
+    let tag = Some(if sub { "subagent" } else { kind });
+    match &e.item {
+        Item::Prompt { from, text, files } => {
+            let author_kind = match from {
+                Some(f) if !f.ends_with("via agentchat") => "peer",
+                _ => "user",
+            };
+            let body = Body::Markdown { text, clamp: Clamp::Off };
+            let mut p = post(key, e.ts, from.as_deref().unwrap_or(me), author_kind, None, None, body);
+            p.files = files.iter().map(String::as_str).collect();
+            p
         }
-    });
-    arrange(posts.collect())
+        Item::Reply(text) => {
+            let clamp = if sub { Clamp::Expand } else { Clamp::Off };
+            post(key, e.ts, author, kind, tag, None, Body::Markdown { text, clamp })
+        }
+        Item::Tool { name, detail, error, files } => {
+            let mut p = post(key, e.ts, author, kind, tag, None, Body::Tool { name, detail, error: *error });
+            p.files = files.iter().map(String::as_str).collect();
+            p
+        }
+    }
 }
 
 fn post<'a>(
@@ -94,7 +122,7 @@ fn post<'a>(
     note: Option<&'static str>,
     body: Body<'a>,
 ) -> Post<'a> {
-    Post { key, ts, author, author_kind, tag, note, body, files: &[], new_day: false, new_group: false }
+    Post { key, ts, author, author_kind, tag, note, body, files: Vec::new(), new_day: false, new_group: false }
 }
 
 /// Sets the day and group breaks: a header for each author run, broken by

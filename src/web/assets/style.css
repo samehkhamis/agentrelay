@@ -77,6 +77,7 @@ body {
 .k-claude, .k-peer { color: var(--claude); }
 .k-codex { color: var(--codex); }
 .k-user { color: var(--user); }
+.k-subagent { color: var(--subagent); }
 
 /* ---------------------------------------------------------------- main */
 

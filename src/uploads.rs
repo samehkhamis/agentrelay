@@ -24,6 +24,16 @@ pub fn save(name: &str, bytes: &[u8]) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Stores bytes under a fixed name, once; returns the stored path.
+pub fn store_named(name: &str, bytes: &[u8]) -> Result<PathBuf> {
+    let path = dir().join(sanitize(name));
+    if !path.exists() {
+        std::fs::create_dir_all(dir())?;
+        std::fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
+    }
+    Ok(path)
+}
+
 /// Copies a local file into the uploads directory.
 pub fn import(src: &Path) -> Result<PathBuf> {
     let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());

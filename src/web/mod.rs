@@ -10,7 +10,7 @@
 
 mod render;
 
-use crate::hub::feed::{self, Body};
+use crate::hub::feed::{self, Body, Clamp};
 use crate::hub::{self, Hub, Input};
 use crate::{db, theme, uploads};
 use anyhow::{anyhow, Result};
@@ -289,10 +289,15 @@ fn feed(shared: &Shared, channel: &str, v: Option<&str>) -> Value {
             let (html, tool, clamp) = match &p.body {
                 Body::Markdown { text, clamp } => {
                     let html = cache.entry(p.key.clone()).or_insert_with(|| render::markdown(text)).clone();
-                    (Some(html), Value::Null, *clamp)
+                    let clamp = match clamp {
+                        Clamp::Off => Value::Null,
+                        Clamp::ToDm => json!("dm"),
+                        Clamp::Expand => json!("expand"),
+                    };
+                    (Some(html), Value::Null, clamp)
                 }
                 Body::Tool { name, detail, error } => {
-                    (None, json!({ "name": name, "detail": detail, "error": error }), false)
+                    (None, json!({ "name": name, "detail": detail, "error": error }), Value::Null)
                 }
             };
             json!({
@@ -308,7 +313,7 @@ fn feed(shared: &Shared, channel: &str, v: Option<&str>) -> Value {
                 "html": html,
                 "tool": tool,
                 "clamp": clamp,
-                "files": p.files.iter().map(|f| file_json(Path::new(f))).collect::<Vec<_>>(),
+                "files": p.files.iter().map(|f| file_json(Path::new(*f))).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -360,6 +365,7 @@ fn theme_css() -> String {
         ("code", theme::CODE),
         ("error", theme::ERROR),
         ("link", theme::LINK),
+        ("subagent", theme::SUBAGENT),
     ];
     let body: Vec<String> = vars.iter().map(|(k, c)| format!("--{k}:{};", hex(*c))).collect();
     format!(":root{{{}--code-bg:#{r:02x}{g:02x}{b:02x};}}", body.join(""))

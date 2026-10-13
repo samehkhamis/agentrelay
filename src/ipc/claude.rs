@@ -67,14 +67,27 @@ fn envelope(text: &str) -> String {
     format!("<{TAG} from-name=\"agentchat\" from-mode=\"{mode}\">\n{body}\n</{TAG}>")
 }
 
-/// Splits a received envelope into (from-name, body). None if `text` isn't one.
+/// Finds an envelope in received text (Claude may wrap it in a notice) and
+/// splits it into (from-name, body).
 pub fn parse_envelope(text: &str) -> Option<(Option<String>, &str)> {
-    let rest = text.strip_prefix(&format!("<{TAG}"))?;
+    let open = format!("<{TAG}");
+    let rest = &text[text.find(&open)? + open.len()..];
     let (attrs, body) = rest.split_once(">\n")?;
-    let body = body.strip_suffix(&format!("\n</{TAG}>")).unwrap_or(body);
+    let body = body.split(&format!("\n</{TAG}>")).next().unwrap_or(body);
     let name = attrs
         .split_once("from-name=\"")
         .and_then(|(_, r)| r.split_once('"'))
         .map(|(n, _)| n.to_string());
     Some((name, body))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{envelope, parse_envelope};
+
+    #[test]
+    fn parses_envelopes_inside_notices() {
+        let wrapped = format!("Another Claude session sent a message:\n{}\n\nThis came from…", envelope("hi there"));
+        assert_eq!(parse_envelope(&wrapped), Some((Some("agentchat".into()), "hi there")));
+    }
 }

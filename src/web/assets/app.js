@@ -195,9 +195,13 @@ function renderPost(p) {
     body.innerHTML = p.html; // rendered and sanitized by the server
     for (const a of body.querySelectorAll("a")) Object.assign(a, { target: "_blank", rel: "noopener noreferrer" });
     post.append(body);
-    if (p.clamp) {
+    if (p.clamp === "dm") {
       const more = el("span", "more", "… open the DM for the full reply");
       more.onclick = () => select(`dm:${p.author}`);
+      post.append(more);
+    } else if (p.clamp === "expand") {
+      const more = el("span", "more", "Show more");
+      more.onclick = () => body.classList.remove("clamp", "overflowing");
       post.append(more);
     }
   }

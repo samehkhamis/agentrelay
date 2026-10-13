@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+base64 = "0.23.1"
 chrono = "0.4.45"
 cpal = { version = "0.18.2", features = ["pulseaudio"] }
 pulldown-cmark = { version = "0.13.4", default-features = false, features = ["html"] }

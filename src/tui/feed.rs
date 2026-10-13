@@ -1,7 +1,7 @@
 //! Drawing a hub feed as terminal lines: day dividers, author headers, bodies.
 
 use super::markdown;
-use crate::hub::feed::{self, Body, Post};
+use crate::hub::feed::{self, Body, Clamp, Post};
 use crate::{theme, uploads};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -36,7 +36,7 @@ pub fn layout(posts: &[Post], width: usize, cache: &mut Cache) -> Vec<Line<'stat
         }
         let body = cache.get(&p.key, body_width, || render_body(&p.body, body_width));
         lines.extend(body.iter().map(|l| indent(l.clone())));
-        for f in p.files {
+        for f in &p.files {
             let name = uploads::display_name(std::path::Path::new(f));
             lines.push(indent(Line::styled(format!("📎 {name}"), Style::new().fg(theme::LINK))));
         }
@@ -79,9 +79,14 @@ fn render_body(body: &Body, width: usize) -> Vec<Line<'static>> {
     match body {
         Body::Markdown { text, clamp } => {
             let mut lines = markdown::render(text, width);
-            if *clamp && lines.len() > feed::STATUS_LINES {
+            let hint = match clamp {
+                Clamp::Off => None,
+                Clamp::ToDm => Some("… open the DM for the full reply"),
+                Clamp::Expand => Some("… (subagent reply, cut short)"),
+            };
+            if let Some(hint) = hint.filter(|_| lines.len() > feed::STATUS_LINES) {
                 lines.truncate(feed::STATUS_LINES);
-                lines.push(Line::styled("… open the DM for the full reply", Style::new().fg(theme::DIM).italic()));
+                lines.push(Line::styled(hint, Style::new().fg(theme::DIM).italic()));
             }
             lines
         }

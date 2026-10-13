@@ -24,9 +24,24 @@ pub fn compose(from: &str, channel: Option<&str>, body: &str, files: &[PathBuf])
     text
 }
 
-/// Inverse of [`compose`]: (`alex in #webapp`, rest of the text).
-pub fn decompose(text: &str) -> Option<(&str, &str)> {
-    text.strip_prefix(PREFIX)?.split_once(": ")
+/// A message as [`compose`] wrote it.
+pub struct Incoming<'a> {
+    /// `alex in #webapp`, or `alex` for a DM.
+    pub from: &'a str,
+    pub body: &'a str,
+    pub files: Vec<String>,
+}
+
+/// Inverse of [`compose`].
+pub fn decompose(text: &str) -> Option<Incoming<'_>> {
+    let (from, rest) = text.strip_prefix(PREFIX)?.split_once(": ")?;
+    let (body, list) = rest.split_once("\n\nAttached files:").unwrap_or((rest, ""));
+    let files = list
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("- `")?.strip_suffix('`'))
+        .map(str::to_string)
+        .collect();
+    Some(Incoming { from, body, files })
 }
 
 /// Sends `text` to each agent: Claude sessions directly, Codex threads through
@@ -50,4 +65,17 @@ pub fn deliver(targets: &[Agent], text: &str, images: &[PathBuf]) -> (Vec<String
         }
     }
     (ok, failed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compose, decompose};
+    use std::path::PathBuf;
+
+    #[test]
+    fn decompose_inverts_compose() {
+        let text = compose("alex", Some("infra"), "look: here", &[PathBuf::from("/u/1-a.png")]);
+        let m = decompose(&text).unwrap();
+        assert_eq!((m.from, m.body, m.files), ("alex in #infra", "look: here", vec!["/u/1-a.png".to_string()]));
+    }
 }

@@ -1,12 +1,13 @@
 //! Claude Code session lines: `user`, `assistant`, `queued_command`
 //! attachments (prompts sent mid-turn) and `ai-title`.
 
-use super::{display_name, first_string, one_line, parse_ts, prompt, tool, Entry, Event, Item};
+use super::{display_name, first_string, images, one_line, parse_ts, prompt, tool, Entry, Event, Item, Opts};
 use serde_json::Value;
 
-pub(super) fn parse(v: &Value) -> Vec<Event> {
-    if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
-        return Vec::new(); // subagent traffic
+/// One line; subagent (`isSidechain`) lines only when reading a subagent file.
+pub(super) fn parse(v: &Value, opts: Opts) -> Vec<Event> {
+    if !opts.sidechain && v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+        return Vec::new();
     }
     let ts = parse_ts(v.get("timestamp"));
     let uuid = v.get("uuid").and_then(Value::as_str).unwrap_or("").to_string();
@@ -16,23 +17,40 @@ pub(super) fn parse(v: &Value) -> Vec<Event> {
         Some("attachment") => {
             let a = &v["attachment"];
             match (a.get("type").and_then(Value::as_str), a.get("prompt").and_then(Value::as_str)) {
-                (Some("queued_command"), Some(p)) => user_text(uuid, ts, p).into_iter().collect(),
+                (Some("queued_command"), Some(p)) => user_text(uuid, ts, p, false, Vec::new()).into_iter().collect(),
                 _ => Vec::new(),
             }
         }
         Some("user") => match v.pointer("/message/content") {
-            Some(Value::String(s)) if !meta => user_text(uuid, ts, s).into_iter().collect(),
-            Some(Value::Array(items)) => items
-                .iter()
-                .filter_map(|i| match i.get("type").and_then(Value::as_str) {
-                    Some("tool_result") => Some(Event::ToolResult {
-                        call: i.get("tool_use_id").and_then(Value::as_str).unwrap_or("").to_string(),
-                        error: i.get("is_error").and_then(Value::as_bool) == Some(true),
-                    }),
-                    Some("text") if !meta => user_text(uuid.clone(), ts, i.get("text")?.as_str()?),
-                    _ => None,
-                })
-                .collect(),
+            Some(Value::String(s)) => user_text(uuid, ts, s, meta, Vec::new()).into_iter().collect(),
+            Some(Value::Array(items)) => {
+                let mut events = Vec::new();
+                let mut texts = Vec::new();
+                let mut files = Vec::new();
+                for i in items {
+                    match i.get("type").and_then(Value::as_str) {
+                        Some("tool_result") => {
+                            // Tool results can carry images, e.g. screenshots.
+                            let shots = match i.get("content") {
+                                Some(Value::Array(c)) if opts.images => c.iter().filter_map(image).collect(),
+                                _ => Vec::new(),
+                            };
+                            events.push(Event::ToolResult {
+                                call: i.get("tool_use_id").and_then(Value::as_str).unwrap_or("").to_string(),
+                                error: i.get("is_error").and_then(Value::as_bool) == Some(true),
+                                files: shots,
+                            })
+                        }
+                        Some("text") => texts.extend(i.get("text").and_then(Value::as_str)),
+                        Some("image") if opts.images => files.extend(image(i)),
+                        _ => {}
+                    }
+                }
+                if !texts.is_empty() || !files.is_empty() {
+                    events.extend(user_text(uuid, ts, &texts.join("\n"), meta, files));
+                }
+                events
+            }
             _ => Vec::new(),
         },
         Some("assistant") => {
@@ -63,20 +81,34 @@ pub(super) fn parse(v: &Value) -> Vec<Event> {
 }
 
 /// A user-side text: a typed prompt, a slash command, or a message from
-/// agentchat / another session (in a `<cross-session-message>` envelope).
-/// Harness-generated wrappers are skipped.
-fn user_text(key: String, ts: i64, text: &str) -> Option<Event> {
+/// agentchat / another session (in a `<cross-session-message>` envelope, which
+/// Claude logs as a meta entry when it starts a turn). Other meta entries and
+/// harness wrappers are skipped.
+fn user_text(key: String, ts: i64, text: &str, meta: bool, files: Vec<String>) -> Option<Event> {
     if let Some((from, body)) = crate::ipc::claude::parse_envelope(text) {
-        return Some(prompt(key, ts, from, body));
+        return Some(prompt(key, ts, from, body, files));
+    }
+    if meta {
+        return None;
     }
     if let Some(rest) = text.strip_prefix("<command-name>") {
         let cmd = rest.split("</command-name>").next().unwrap_or(rest);
-        return Some(prompt(key, ts, None, cmd));
+        return Some(prompt(key, ts, None, cmd, files));
     }
-    if text.trim_start().starts_with('<') || text.trim().is_empty() {
+    if text.trim_start().starts_with('<') || (text.trim().is_empty() && files.is_empty()) {
         return None; // local command output, reminders, notifications
     }
-    Some(prompt(key, ts, None, text))
+    Some(prompt(key, ts, None, text, files))
+}
+
+/// An inline `{type: image, source: {type: base64, media_type, data}}` block.
+fn image(item: &Value) -> Option<String> {
+    if item.get("type").and_then(Value::as_str) != Some("image") {
+        return None;
+    }
+    let src = item.get("source")?;
+    let media = src.get("media_type").and_then(Value::as_str).unwrap_or("image/png");
+    images::store(media, src.get("data")?.as_str()?)
 }
 
 fn summarize(name: &str, input: &Value) -> String {
