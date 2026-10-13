@@ -5,25 +5,25 @@
 //! answers requests addressed to localhost (against DNS rebinding), and every
 //! API call must carry an `X-Agentchat` header, which other sites can't add to
 //! a cross-origin request without a CORS preflight this server never grants.
+//! `/files/<id>` serves only stored uploads.
 
 mod render;
 
-use crate::db;
 use crate::hub::feed::{self, Body};
 use crate::hub::{self, Hub, Input};
-use crate::theme;
+use crate::{db, theme, uploads};
 use anyhow::{anyhow, Result};
 use ratatui::style::Color;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tiny_http::{Header, Method, Request, Response, Server};
 
-pub const DEFAULT_PORT: u16 = 7878;
+pub const DEFAULT_PORT: u16 = 3000;
 const API_HEADER: &str = "X-Agentchat";
 const POLL: Duration = Duration::from_millis(400);
 
@@ -143,9 +143,9 @@ fn handle(mut req: Request, shared: &Shared) {
     if path.starts_with("/api/") && header(&req, API_HEADER).is_none() {
         return respond(req, 403, "text/plain", "missing API header");
     }
-    let mut body = String::new();
-    let _ = req.as_reader().read_to_string(&mut body);
-    let body: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+    let mut raw = Vec::new();
+    let _ = req.as_reader().take(uploads::MAX_BYTES as u64 + 1).read_to_end(&mut raw);
+    let body: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
     let arg = |k: &str| query_arg(&query, k).or_else(|| body.get(k).and_then(Value::as_str).map(str::to_string));
 
     match (req.method(), path.as_str()) {
@@ -153,6 +153,15 @@ fn handle(mut req: Request, shared: &Shared) {
         (Method::Get, "/style.css") => respond(req, 200, "text/css", STYLE),
         (Method::Get, "/theme.css") => respond(req, 200, "text/css", theme_css()),
         (Method::Get, "/app.js") => respond(req, 200, "text/javascript", SCRIPT),
+        (Method::Get, p) if p.starts_with("/files/") => match uploads::resolve(&percent_decode(&p[7..])) {
+            Some(path) => {
+                let nosniff = Header::from_bytes("X-Content-Type-Options", "nosniff").expect("valid header");
+                let ct = Header::from_bytes("Content-Type", uploads::mime(&path)).expect("valid header");
+                let data = std::fs::read(&path).unwrap_or_default();
+                let _ = req.respond(Response::from_data(data).with_header(ct).with_header(nosniff));
+            }
+            None => respond(req, 404, "text/plain", "not found"),
+        },
         (Method::Get, "/api/ping") => respond_json(req, json!({ "ok": true })),
         (Method::Get, "/api/state") => respond_json(req, state(shared)),
         (Method::Get, "/api/feed") => {
@@ -163,8 +172,21 @@ fn handle(mut req: Request, shared: &Shared) {
             shared.hub.lock().unwrap().mark_seen(&arg("channel").unwrap_or_default());
             respond_json(req, json!({ "ok": true }))
         }
+        (Method::Post, "/api/upload") => {
+            let name = arg("name").unwrap_or_else(|| "file".into());
+            let v = match uploads::save(&name, &raw) {
+                Ok(path) => file_json(&path),
+                Err(e) => json!({ "error": e.to_string() }),
+            };
+            respond_json(req, v)
+        }
         (Method::Post, "/api/send") => {
-            let v = send(shared, &arg("channel").unwrap_or_default(), &arg("text").unwrap_or_default());
+            let files: Vec<PathBuf> = body
+                .get("files")
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(Value::as_str).filter_map(uploads::resolve).collect())
+                .unwrap_or_default();
+            let v = send(shared, &arg("channel").unwrap_or_default(), &arg("text").unwrap_or_default(), &files);
             respond_json(req, v)
         }
         (Method::Post, "/api/stop") => {
@@ -270,20 +292,22 @@ fn feed(shared: &Shared, channel: &str, v: Option<&str>) -> Value {
                 "html": html,
                 "tool": tool,
                 "clamp": clamp,
+                "files": p.files.iter().map(|f| file_json(Path::new(f))).collect::<Vec<_>>(),
             })
         })
         .collect();
     json!({ "v": version, "posts": posts })
 }
 
-fn send(shared: &Shared, channel: &str, text: &str) -> Value {
+fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value {
     let body = match hub::parse_input(text) {
         Some(Input::Send(body)) => body,
+        None if !files.is_empty() => String::new(),
         Some(Input::Help) => return json!({ "note": hub::HELP }),
         _ => return json!({}),
     };
     // Log under the lock; deliver without it, since sockets can be slow.
-    let delivery = shared.hub.lock().unwrap().send(channel, &body);
+    let delivery = shared.hub.lock().unwrap().send(channel, &body, files);
     match delivery {
         Err(e) => json!({ "note": format!("failed: {e}") }),
         Ok(None) => json!({ "note": "nobody online here to deliver to" }),
@@ -292,6 +316,10 @@ fn send(shared: &Shared, channel: &str, text: &str) -> Value {
             json!({ "delivered": delivered, "failed": failed })
         }
     }
+}
+
+fn file_json(path: &Path) -> Value {
+    json!({ "id": uploads::id_of(path), "name": uploads::display_name(path), "image": uploads::is_image(path) })
 }
 
 /// The TUI's palette as CSS variables, so both UIs use the same colors.

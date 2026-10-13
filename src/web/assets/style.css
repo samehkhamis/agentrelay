@@ -37,6 +37,8 @@ body {
 #sidebar {
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
   min-height: 0;
   background: var(--sidebar-bg);
   color: var(--sidebar-fg);
@@ -78,7 +80,7 @@ body {
 
 /* ---------------------------------------------------------------- main */
 
-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100vh; }
+main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100vh; height: 100dvh; }
 #header {
   display: flex;
   align-items: center;
@@ -88,7 +90,34 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
   padding: 0 20px;
   border-bottom: 1px solid var(--rule);
 }
-.heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.heading { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
+#menu {
+  display: none;
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin-left: -8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font-size: 22px;
+  cursor: pointer;
+}
+#menu:hover { background: var(--hover); }
+#menu-badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--badge-bg);
+  color: #fff;
+  font: 700 10px/16px var(--font);
+}
+#backdrop { display: none; }
 #title { margin: 0; font-size: 18px; font-weight: 800; white-space: nowrap; }
 #detail { overflow: hidden; color: var(--muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 #toast { flex: none; color: var(--user); font-size: 13px; font-style: italic; transition: opacity .3s; }
@@ -171,12 +200,70 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
   cursor: pointer;
 }
 
+/* ---------------------------------------------------------------- attachments */
+
+.files { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 2px; }
+.files img {
+  display: block;
+  max-width: min(360px, 100%);
+  max-height: 240px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  color: var(--fg);
+  font-size: 13px;
+  text-decoration: none;
+}
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip button { padding: 0 2px; border: 0; background: none; color: var(--muted); font-size: 15px; cursor: pointer; }
+#attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+#attachments:not(:empty) { padding-bottom: 8px; }
+#attachments .thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
+
+#drop {
+  position: absolute;
+  inset: 8px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--selected-bg);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  font-size: 18px;
+  font-weight: 700;
+  pointer-events: none;
+}
+#drop[hidden] { display: none; }
+
 /* ---------------------------------------------------------------- composer */
 
-#composer { padding: 0 20px 14px; }
+#composer { padding: 0 20px 14px; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
+.input-row { position: relative; }
+#attach {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 17px;
+  cursor: pointer;
+}
+#attach:hover { background: var(--hover); }
 #input {
   display: block;
   width: 100%;
+  padding-right: 44px;
   min-height: 44px;
   max-height: 40vh;
   padding: 11px 12px;
@@ -190,8 +277,31 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
 #input:focus { outline: none; border-color: var(--muted); }
 .composer-hint { padding-top: 4px; color: var(--muted); font-size: 11px; text-align: right; }
 
-@media (max-width: 720px) {
-  body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  #sidebar { max-height: 38vh; }
-  main { height: 62vh; }
+/* ---------------------------------------------------------------- phones: sidebar becomes a drawer */
+
+@media (max-width: 760px) {
+  body { grid-template-columns: 1fr; font-size: 15px; }
+  #sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: min(300px, 84vw);
+    padding-top: env(safe-area-inset-top);
+    transform: translateX(-100%);
+    transition: transform .2s ease;
+    box-shadow: 0 0 24px rgba(0, 0, 0, .35);
+  }
+  body.drawer #sidebar { transform: none; }
+  body.drawer #backdrop { display: block; position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .45); }
+  #menu { display: block; }
+  #header { gap: 6px; min-height: 52px; padding: 0 12px; padding-top: env(safe-area-inset-top); }
+  #title { font-size: 17px; }
+  #detail { display: none; }
+  .post { padding: 2px 12px; }
+  .day { margin: 16px 12px 4px; }
+  #composer { padding: 0 10px 10px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+  #input { font-size: 16px; } /* keeps iOS from zooming on focus */
+  .composer-hint { display: none; }
+  .row { height: 36px; }
+  #jump { right: 14px; bottom: 80px; }
 }

@@ -12,6 +12,7 @@ let feedVersion = null;
 let awaiting = new Set();
 let sound = localStorage.getItem("agentchat.sound") !== "off";
 let toastTimer = null;
+let pending = []; // uploaded files waiting to be sent: {id, name, image}
 
 function api(path, body) {
   const init = { headers: { "X-Agentchat": "1", "Content-Type": "application/json" } };
@@ -72,6 +73,7 @@ async function refreshState() {
 }
 
 function select(id) {
+  document.body.classList.remove("drawer");
   if (id === current) return;
   current = id;
   localStorage.setItem("agentchat.channel", id);
@@ -93,6 +95,9 @@ function presenceDot(presence) {
 
 function renderSidebar() {
   $("me").textContent = `${state.me} · ${state.online} online`;
+  const unread = state.channels.filter((c) => c.id !== current).reduce((n, c) => n + c.unread, 0);
+  $("menu-badge").hidden = !unread;
+  $("menu-badge").textContent = unread > 99 ? "99+" : unread;
   const nav = $("channels");
   nav.replaceChildren();
   let section = null;
@@ -196,8 +201,30 @@ function renderPost(p) {
       post.append(more);
     }
   }
+  if (p.files?.length) post.append(renderFiles(p.files));
   out.push(post);
   return out;
+}
+
+function fileUrl(f) {
+  return `/files/${encodeURIComponent(f.id)}`;
+}
+
+function renderFiles(files) {
+  const box = el("div", "files");
+  for (const f of files) {
+    const a = el("a", f.image ? "" : "chip");
+    Object.assign(a, { href: fileUrl(f), target: "_blank", rel: "noopener" });
+    if (f.image) {
+      const img = el("img");
+      Object.assign(img, { src: fileUrl(f), alt: f.name, loading: "lazy" });
+      a.append(img);
+    } else {
+      a.append("📎 ", el("span", "", f.name));
+    }
+    box.append(a);
+  }
+  return box;
 }
 
 // ---------------------------------------------------------------- composer
@@ -205,7 +232,7 @@ function renderPost(p) {
 async function submit() {
   const input = $("input");
   const text = input.value.trim();
-  if (!text) return;
+  if (!text && !pending.length) return;
   input.value = "";
   autosize();
   if (text === "/sound") {
@@ -217,7 +244,10 @@ async function submit() {
   }
   if (text === "/quit" || text === "/q") return;
   toast("sending…");
-  const r = await api("/api/send", { channel: current, text });
+  const files = pending.map((f) => f.id);
+  pending = [];
+  renderPending();
+  const r = await api("/api/send", { channel: current, text, files });
   if (r.delivered) {
     r.delivered.forEach((a) => awaiting.add(a));
     toast(`delivered to ${r.delivered.length}${r.failed.length ? ` · failed: ${r.failed.join(", ")}` : ""}`);
@@ -227,6 +257,89 @@ async function submit() {
   feedVersion = null;
   refreshFeed();
 }
+
+// ---------------------------------------------------------------- attachments
+
+async function upload(fileList) {
+  for (const file of fileList) {
+    toast(`uploading ${file.name}…`);
+    const r = await fetch(`/api/upload?name=${encodeURIComponent(file.name || "pasted.png")}`, {
+      method: "POST",
+      headers: { "X-Agentchat": "1" },
+      body: file,
+    }).then((res) => res.json());
+    if (r.error) toast(r.error);
+    else pending.push(r);
+  }
+  renderPending();
+  if (pending.length) toast(`${pending.length} file(s) ready to send`);
+  $("input").focus();
+}
+
+function renderPending() {
+  // The composer grows or shrinks; keep the feed pinned if it was.
+  const stick = atBottom();
+  requestAnimationFrame(() => {
+    if (stick) $("feed").scrollTop = $("feed").scrollHeight;
+    $("jump").hidden = atBottom();
+  });
+  $("attachments").replaceChildren(...pending.map((f, i) => {
+    const chip = el("div", "chip");
+    if (f.image) {
+      const img = el("img", "thumb");
+      img.src = fileUrl(f);
+      chip.append(img);
+    } else {
+      chip.append("📎");
+    }
+    const remove = el("button", "", "×");
+    Object.assign(remove, { type: "button", title: "Remove" });
+    remove.onclick = () => {
+      pending.splice(i, 1);
+      renderPending();
+    };
+    chip.append(el("span", "", f.name), remove);
+    return chip;
+  }));
+}
+
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+let dragDepth = 0;
+document.addEventListener("dragenter", (e) => {
+  if (!hasFiles(e)) return;
+  dragDepth++;
+  $("drop").hidden = false;
+});
+document.addEventListener("dragleave", () => {
+  if (--dragDepth <= 0) {
+    dragDepth = 0;
+    $("drop").hidden = true;
+  }
+});
+document.addEventListener("dragover", (e) => hasFiles(e) && e.preventDefault());
+document.addEventListener("drop", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  $("drop").hidden = true;
+  upload(e.dataTransfer.files);
+});
+document.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData?.files || [])];
+  if (!files.length) return;
+  e.preventDefault();
+  upload(files);
+});
+$("attach").onclick = () => $("file").click();
+$("file").onchange = () => {
+  upload($("file").files);
+  $("file").value = "";
+};
+
+// ---------------------------------------------------------------- drawer (phones)
+
+$("menu").onclick = () => document.body.classList.toggle("drawer");
+$("backdrop").onclick = () => document.body.classList.remove("drawer");
 
 function autosize() {
   const input = $("input");
@@ -242,6 +355,9 @@ $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     submit();
+  } else if (e.key === "Backspace" && !$("input").value && pending.length) {
+    pending.pop();
+    renderPending();
   }
 });
 $("input").addEventListener("input", autosize);
@@ -263,4 +379,4 @@ document.addEventListener("keydown", (e) => {
 refreshState().then(refreshFeed);
 setInterval(() => refreshState().catch(() => toast("server unreachable")), STATE_EVERY);
 setInterval(() => refreshFeed().catch(() => {}), FEED_EVERY);
-$("input").focus();
+if (matchMedia("(min-width: 761px)").matches) $("input").focus(); // don't pop the phone keyboard
