@@ -1,0 +1,266 @@
+// The agentchat web client: polls the local server's JSON API and renders the
+// same channels, feeds and highlighting as the terminal UI.
+
+const $ = (id) => document.getElementById(id);
+const STATE_EVERY = 1500;
+const FEED_EVERY = 1000;
+const TOAST_FOR = 4000;
+
+let state = { channels: [], statuses: {} };
+let current = localStorage.getItem("agentchat.channel") || "all";
+let feedVersion = null;
+let awaiting = new Set();
+let sound = localStorage.getItem("agentchat.sound") !== "off";
+let toastTimer = null;
+
+function api(path, body) {
+  const init = { headers: { "X-Agentchat": "1", "Content-Type": "application/json" } };
+  if (body !== undefined) Object.assign(init, { method: "POST", body: JSON.stringify(body) });
+  return fetch(path, init).then((r) => r.json());
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function toast(text) {
+  const t = $("toast");
+  t.textContent = text;
+  t.style.opacity = 1;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.style.opacity = 0), TOAST_FOR);
+}
+
+// The same two-note chime as the terminal UI.
+function ping() {
+  if (!sound) return;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  [[880, 0, 0.16], [1318.5, 0.09, 0.24]].forEach(([freq, delay, len]) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.18, ctx.currentTime + delay);
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + delay + len);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(ctx.currentTime + delay);
+    osc.stop(ctx.currentTime + delay + len);
+  });
+}
+
+// ---------------------------------------------------------------- state
+
+function channel(id) {
+  return state.channels.find((c) => c.id === id);
+}
+
+async function refreshState() {
+  const prev = state.statuses;
+  state = await api("/api/state");
+  for (const [agent, id] of Object.entries(state.statuses)) {
+    if (awaiting.has(agent) && prev[agent] !== undefined && id > prev[agent]) {
+      awaiting.delete(agent);
+      ping();
+      toast(`${agent} replied`);
+    }
+  }
+  if (!channel(current)) current = "all";
+  renderSidebar();
+  renderHeader();
+}
+
+function select(id) {
+  if (id === current) return;
+  current = id;
+  localStorage.setItem("agentchat.channel", id);
+  feedVersion = null;
+  $("feed").replaceChildren();
+  renderSidebar();
+  renderHeader();
+  refreshFeed();
+  $("input").focus();
+}
+
+// ---------------------------------------------------------------- sidebar and header
+
+const SECTIONS = { top: "Channels", projects: "Projects", direct: "Direct messages" };
+
+function presenceDot(presence) {
+  return el("span", `dot ${presence || "away"}`);
+}
+
+function renderSidebar() {
+  $("me").textContent = `${state.me} · ${state.online} online`;
+  const nav = $("channels");
+  nav.replaceChildren();
+  let section = null;
+  for (const c of state.channels) {
+    if (c.section !== section) {
+      section = c.section;
+      nav.append(el("div", "section", `▾ ${SECTIONS[section]}`));
+    }
+    const selected = c.id === current;
+    const unread = selected ? 0 : c.unread;
+    const row = el("div", `row${selected ? " selected" : ""}${unread ? " unread" : ""}`);
+    row.append(c.section === "direct" ? presenceDot(c.presence) : el("span", "glyph", "#"));
+    row.append(el("span", "name", c.name));
+    if (unread) row.append(el("span", "badge", unread));
+    else if (c.section === "direct") row.append(el("span", `side k-${c.kind || "claude"}`, c.kind || ""));
+    else if (c.section === "projects") row.append(el("span", "side", c.members));
+    row.onclick = () => select(c.id);
+    nav.append(row);
+  }
+}
+
+function renderHeader() {
+  const c = channel(current);
+  if (!c) return;
+  $("title-dot").replaceChildren(...(c.section === "direct" ? [presenceDot(c.presence)] : []));
+  $("title").textContent = c.title;
+  $("detail").textContent = c.detail;
+  $("input").placeholder = `Message ${c.title}`;
+  document.title = `${c.title} · agentchat`;
+}
+
+// ---------------------------------------------------------------- feed
+
+function atBottom() {
+  const f = $("feed");
+  return f.scrollHeight - f.scrollTop - f.clientHeight < 40;
+}
+
+async function refreshFeed() {
+  const id = current;
+  const q = new URLSearchParams({ channel: id, ...(feedVersion ? { v: feedVersion } : {}) });
+  const data = await api(`/api/feed?${q}`);
+  if (id !== current || data.error) return;
+  if (!data.same) {
+    feedVersion = data.v;
+    renderFeed(data.posts);
+  }
+  if (atBottom() && (channel(id)?.unread ?? 0) > 0) api("/api/seen", { channel: id });
+}
+
+function renderFeed(posts) {
+  const feed = $("feed");
+  const stick = atBottom() || !feed.childElementCount;
+  const nodes = posts.map(renderPost).flat();
+  if (!posts.length) {
+    const c = channel(current);
+    const hint = c?.section === "direct"
+      ? `Nothing from ${c.name} yet.`
+      : `This is the start of ${c?.title ?? "this channel"}. Type /status to ask everyone here for an update.`;
+    nodes.push(el("div", "empty", hint));
+  }
+  feed.replaceChildren(...nodes);
+  for (const body of feed.querySelectorAll(".body.clamp")) {
+    body.classList.toggle("overflowing", body.scrollHeight > body.clientHeight + 2);
+  }
+  // Pin to the bottom now and again after layout settles (clamps, fonts).
+  const settle = () => {
+    if (stick) feed.scrollTop = feed.scrollHeight;
+    $("jump").hidden = atBottom();
+  };
+  settle();
+  requestAnimationFrame(settle);
+}
+
+function renderPost(p) {
+  const out = [];
+  if (p.new_day) out.push(el("div", "day", p.day));
+  const post = el("div", `post${p.new_group ? " first" : ""}`);
+  if (p.new_group) {
+    const head = el("div", "post-head");
+    head.append(el("span", `author k-${p.kind}`, p.author));
+    if (p.tag) head.append(el("span", "meta", p.tag));
+    head.append(el("span", "meta", p.time));
+    if (p.note) head.append(el("span", "note", p.note));
+    post.append(head);
+  }
+  if (p.tool) {
+    const t = el("div", `tool${p.tool.error ? " error" : ""}`);
+    t.append(el("span", "mark", p.tool.error ? "✗" : "▸"), el("span", "tool-name", p.tool.name),
+      el("span", "tool-detail", p.tool.detail));
+    t.title = p.tool.detail;
+    post.append(t);
+  } else {
+    const body = el("div", `body${p.clamp ? " clamp" : ""}`);
+    body.innerHTML = p.html; // rendered and sanitized by the server
+    for (const a of body.querySelectorAll("a")) Object.assign(a, { target: "_blank", rel: "noopener noreferrer" });
+    post.append(body);
+    if (p.clamp) {
+      const more = el("span", "more", "… open the DM for the full reply");
+      more.onclick = () => select(`dm:${p.author}`);
+      post.append(more);
+    }
+  }
+  out.push(post);
+  return out;
+}
+
+// ---------------------------------------------------------------- composer
+
+async function submit() {
+  const input = $("input");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  autosize();
+  if (text === "/sound") {
+    sound = !sound;
+    localStorage.setItem("agentchat.sound", sound ? "on" : "off");
+    toast(`sound ${sound ? "on" : "off"}`);
+    ping();
+    return;
+  }
+  if (text === "/quit" || text === "/q") return;
+  toast("sending…");
+  const r = await api("/api/send", { channel: current, text });
+  if (r.delivered) {
+    r.delivered.forEach((a) => awaiting.add(a));
+    toast(`delivered to ${r.delivered.length}${r.failed.length ? ` · failed: ${r.failed.join(", ")}` : ""}`);
+  } else if (r.note) {
+    toast(r.note);
+  }
+  feedVersion = null;
+  refreshFeed();
+}
+
+function autosize() {
+  const input = $("input");
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight + 2}px`;
+}
+
+$("composer").onsubmit = (e) => {
+  e.preventDefault();
+  submit();
+};
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    submit();
+  }
+});
+$("input").addEventListener("input", autosize);
+$("feed").addEventListener("scroll", () => ($("jump").hidden = atBottom()));
+$("jump").onclick = () => {
+  const f = $("feed");
+  f.scrollTop = f.scrollHeight;
+};
+document.addEventListener("keydown", (e) => {
+  if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+  e.preventDefault();
+  const i = state.channels.findIndex((c) => c.id === current);
+  const n = state.channels.length;
+  select(state.channels[(i + (e.key === "ArrowUp" ? -1 : 1) + n) % n].id);
+});
+
+// ---------------------------------------------------------------- start
+
+refreshState().then(refreshFeed);
+setInterval(() => refreshState().catch(() => toast("server unreachable")), STATE_EVERY);
+setInterval(() => refreshFeed().catch(() => {}), FEED_EVERY);
+$("input").focus();
