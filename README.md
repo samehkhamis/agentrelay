@@ -70,17 +70,27 @@ In practice:
 
 ## Install
 
-agentrelay is a single Rust binary.
+On Linux (x86_64 or ARM64) or macOS (Apple Silicon or Intel):
 
 ```sh
-git clone <this repo> && cd agentrelay
-cargo build --release
-cp target/release/agentrelay ~/.local/bin/   # or anywhere on your PATH
+curl -fsSL https://raw.githubusercontent.com/samehkhamis/agentrelay/main/install.sh | sh
 ```
 
-It needs Rust 1.90 or newer. On Linux, the reply chime uses
-PulseAudio when it's available, which includes WSLg. Elsewhere it uses the
-default audio output.
+This downloads the latest release, checks its checksum, and installs the
+`agentrelay` binary to `~/.local/bin` (set `AGENTRELAY_INSTALL_DIR` for another
+folder). Add `-s -- --version v0.1.0` after `sh` for a specific release, or
+`-s -- --uninstall` to remove it. Your data in `~/.agentrelay` is kept.
+
+To build from source instead, with Rust 1.90 or newer:
+
+```sh
+git clone https://github.com/samehkhamis/agentrelay.git && cd agentrelay
+cargo build --release
+cp target/release/agentrelay ~/.local/bin/
+```
+
+On Linux, the reply chime plays through PulseAudio, including on WSLg. Without
+it, agentrelay rings the terminal bell instead.
 
 ## Usage
 
