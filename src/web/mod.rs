@@ -2,7 +2,8 @@
 //! the page and a small JSON API the page polls.
 //!
 //! The API can type prompts into agents, so it only binds to 127.0.0.1, only
-//! answers requests addressed to localhost (against DNS rebinding), and every
+//! answers requests addressed to localhost or this machine's own tailnet name
+//! (for `tailscale serve`; this check stops DNS rebinding), and every
 //! API call must carry an `X-Agentchat` header, which other sites can't add to
 //! a cross-origin request without a CORS preflight this server never grants.
 //! `/files/<id>` serves only stored uploads.
@@ -35,13 +36,15 @@ struct Shared {
     hub: Mutex<Hub>,
     /// Rendered post HTML by key.
     html: Mutex<HashMap<String, String>>,
-    port: u16,
+    /// Host names requests may be addressed to, besides the tailnet name.
+    hosts: [String; 2],
 }
 
 /// Runs the server in the foreground until `/api/stop`.
 pub fn serve(port: u16) -> Result<()> {
     let server = Server::http(("127.0.0.1", port)).map_err(|e| anyhow!("listening on 127.0.0.1:{port}: {e}"))?;
-    let shared = Arc::new(Shared { hub: Mutex::new(Hub::open()?), html: Mutex::default(), port });
+    let hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+    let shared = Arc::new(Shared { hub: Mutex::new(Hub::open()?), html: Mutex::default(), hosts });
     std::fs::write(info_path(), json!({ "pid": std::process::id(), "port": port }).to_string())?;
 
     let poller = shared.clone();
@@ -116,6 +119,19 @@ fn call(port: u16, method: &str, path: &str) -> Result<String> {
     }
 }
 
+/// This machine's tailnet name (e.g. `box.tailnet.ts.net`), from the local
+/// tailscaled API, so `tailscale serve` to this port works with no setup.
+fn tailnet_name() -> Option<String> {
+    let mut s = std::os::unix::net::UnixStream::connect("/var/run/tailscale/tailscaled.sock").ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    s.write_all(b"GET /localapi/v0/status HTTP/1.0\r\nHost: local-tailscaled.sock\r\n\r\n").ok()?;
+    let mut out = String::new();
+    s.read_to_string(&mut out).ok()?;
+    let status: Value = serde_json::from_str(out.split_once("\r\n\r\n")?.1).ok()?;
+    let name = status.pointer("/Self/DNSName")?.as_str()?;
+    Some(name.trim_end_matches('.').to_ascii_lowercase())
+}
+
 // ---------------------------------------------------------------- routing
 
 fn header<'a>(req: &'a Request, name: &str) -> Option<&'a str> {
@@ -133,8 +149,8 @@ fn respond_json(req: Request, v: Value) {
 }
 
 fn handle(mut req: Request, shared: &Shared) {
-    let host_ok = header(&req, "Host")
-        .is_some_and(|h| [format!("127.0.0.1:{}", shared.port), format!("localhost:{}", shared.port)].contains(&h.to_string()));
+    let host = header(&req, "Host").unwrap_or("").to_ascii_lowercase();
+    let host_ok = shared.hosts.contains(&host) || tailnet_name().is_some_and(|name| host == name);
     if !host_ok {
         return respond(req, 403, "text/plain", "forbidden");
     }

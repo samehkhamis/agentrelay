@@ -16,7 +16,8 @@ const USAGE: &str = "agentchat — a Slack-style chat for your Claude Code and C
 
 usage:
   agentchat                      open the TUI
-  agentchat start [--port N]     run the web UI in the background (default port 3000)
+  agentchat start [--port N]     run the web UI in the background (default port 3000);
+                                 reachable from your tailnet via `tailscale serve`
   agentchat stop                 stop the background web UI
   agentchat serve [--port N]     run the web UI in the foreground
   agentchat who                  list discovered agents
