@@ -421,8 +421,9 @@ impl App {
         let actions = self.hub.channel(&self.selected).and_then(|c| self.hub.post_actions(c, &key));
         let (files, text) = actions.unwrap_or_default();
         let tool = self.tool_info.get(&key).cloned();
+        let modified = k.modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL);
         match k.code {
-            KeyCode::Up | KeyCode::Down => self.move_cursor(k.code == KeyCode::Up),
+            KeyCode::Up | KeyCode::Down if !modified => self.move_cursor(k.code == KeyCode::Up),
             KeyCode::Esc => self.cursor = None,
             KeyCode::Enter => match tool {
                 Some(t) if t.expandable => {
