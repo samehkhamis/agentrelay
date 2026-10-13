@@ -45,6 +45,12 @@ pub fn background() -> Rgb {
 /// unknown): one token list per source line, tabs expanded.
 pub fn lines(lang: &str, code: &str) -> Vec<Vec<(Rgb, String)>> {
     let syntaxes = &assets().0;
+    // syntect's built-in set lacks some common languages; use the nearest one.
+    let lang = match lang {
+        "ts" | "tsx" | "typescript" | "mts" | "cts" | "jsx" => "js",
+        "zsh" | "fish" | "console" | "shell" => "bash",
+        other => other,
+    };
     let syntax = syntaxes.find_syntax_by_token(lang).unwrap_or_else(|| syntaxes.find_syntax_plain_text());
     let mut hl = HighlightLines::new(syntax, syntax_theme());
     LinesWithEndings::from(code)
