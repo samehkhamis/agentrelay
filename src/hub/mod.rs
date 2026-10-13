@@ -201,6 +201,14 @@ impl Hub {
         }
     }
 
+    /// A tool call's full input (markdown), by post key, for expanding it.
+    pub fn tool_full(&self, chan: &Channel, key: &str) -> Option<String> {
+        self.posts(chan).into_iter().find(|p| p.key == key).and_then(|p| match p.body {
+            feed::Body::Tool { full, .. } if !full.is_empty() => Some(full.to_string()),
+            _ => None,
+        })
+    }
+
     /// Changes whenever the channel's feed does, so a UI can skip redrawing.
     pub fn version(&self, chan: &Channel) -> String {
         match chan.agent().and_then(|n| self.tails.get(n)) {

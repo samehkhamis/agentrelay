@@ -1,7 +1,7 @@
 //! Claude Code session lines: `user`, `assistant`, `queued_command`
 //! attachments (prompts sent mid-turn) and `ai-title`.
 
-use super::{display_name, first_string, images, one_line, parse_ts, prompt, tool, Entry, Event, Item, Opts};
+use super::{display_name, fenced, first_string, images, one_line, parse_ts, prompt, tool, Call, Entry, Event, Item, Opts};
 use serde_json::Value;
 
 /// One line; subagent (`isSidechain`) lines only when reading a subagent file.
@@ -69,7 +69,7 @@ pub(super) fn parse(v: &Value, opts: Opts) -> Vec<Event> {
                             let name = i.get("name")?.as_str()?;
                             let input = i.get("input").unwrap_or(&Value::Null);
                             let call = i.get("id").and_then(Value::as_str).map(str::to_string);
-                            Some(tool(key, ts, display_name(name), summarize(name, input), call))
+                            Some(tool(key, ts, describe(name, input), call))
                         }
                         _ => None,
                     }
@@ -111,16 +111,45 @@ fn image(item: &Value) -> Option<String> {
     images::store(media, src.get("data")?.as_str()?)
 }
 
-fn summarize(name: &str, input: &Value) -> String {
+/// A Claude tool call: its one-liner, its full input as markdown (a command,
+/// a diff for edits, the written content), and the file it works on.
+fn describe(name: &str, input: &Value) -> Call {
     let field = |k: &str| input.get(k).and_then(Value::as_str);
+    let path = field("file_path").or(field("notebook_path")).map(str::to_string);
+    let ext = |p: &Option<String>| p.as_deref().and_then(|p| p.rsplit_once('.')).map_or("", |(_, e)| e).to_string();
     let detail = match name {
         "Bash" => field("command"),
-        "Read" | "Write" | "Edit" | "NotebookEdit" => field("file_path").or(field("notebook_path")),
+        "Read" | "Write" | "Edit" | "NotebookEdit" => path.as_deref(),
         "Grep" | "Glob" => field("pattern"),
         "WebFetch" => field("url"),
         "WebSearch" => field("query"),
         "Agent" | "Task" => field("description"),
         _ => None,
     };
-    detail.map(one_line).unwrap_or_else(|| first_string(input))
+    let detail = detail.map(one_line).unwrap_or_else(|| first_string(input));
+    let full = match name {
+        "Bash" => fenced("bash", field("command").unwrap_or("")),
+        "Edit" => edit_diff(field("old_string").unwrap_or(""), field("new_string").unwrap_or("")),
+        "MultiEdit" => input
+            .get("edits")
+            .and_then(Value::as_array)
+            .map(|edits| {
+                let diffs: Vec<String> = edits
+                    .iter()
+                    .map(|e| edit_diff(e["old_string"].as_str().unwrap_or(""), e["new_string"].as_str().unwrap_or("")))
+                    .collect();
+                diffs.join("\n\n")
+            })
+            .unwrap_or_default(),
+        "Write" => fenced(&ext(&path), field("content").unwrap_or("")),
+        "Read" => String::new(), // the path says it all
+        _ => fenced("json", &serde_json::to_string_pretty(input).unwrap_or_default()),
+    };
+    Call { name: display_name(name), detail, full, path }
+}
+
+/// An edit as a unified-looking diff block.
+fn edit_diff(old: &str, new: &str) -> String {
+    let lines = |text: &str, mark: char| text.lines().map(|l| format!("{mark} {l}")).collect::<Vec<_>>().join("\n");
+    fenced("diff", &format!("{}\n{}", lines(old, '-'), lines(new, '+')))
 }

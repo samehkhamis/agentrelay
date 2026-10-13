@@ -20,8 +20,9 @@ pub enum Item {
     /// session; `files` are attached files and images (paths).
     Prompt { from: Option<String>, text: String, files: Vec<String> },
     Reply(String),
-    /// `files` are images the tool returned, e.g. screenshots.
-    Tool { name: String, detail: String, error: bool, files: Vec<String> },
+    /// A tool call: a one-line `detail`, the `full` input as markdown, the
+    /// file it works on (if any), and images it returned (e.g. screenshots).
+    Tool { name: String, detail: String, full: String, path: Option<String>, error: bool, files: Vec<String> },
 }
 
 pub struct Entry {
@@ -75,6 +76,9 @@ struct Log {
     entries: Vec<Entry>,
     /// Tool call id -> index in `entries`, to mark failed calls.
     calls: HashMap<String, usize>,
+    /// Files attached to prompts so far: a tool reading one again doesn't
+    /// show its image a second time.
+    attached: std::collections::HashSet<String>,
 }
 
 impl Log {
@@ -91,6 +95,7 @@ impl Log {
             skip_first: offset > 0,
             entries: Vec::new(),
             calls: HashMap::new(),
+            attached: Default::default(),
         };
         log.poll();
         log
@@ -133,13 +138,19 @@ impl Log {
                 if let Some(id) = call {
                     self.calls.insert(id, self.entries.len());
                 }
+                if let Item::Prompt { files, .. } = &e.item {
+                    self.attached.extend(files.iter().cloned());
+                }
                 self.entries.push(e);
             }
             Event::ToolResult { call, error, files } => {
                 let tool = self.calls.get(&call).and_then(|i| self.entries.get_mut(*i)).map(|e| &mut e.item);
-                if let Some(Item::Tool { error: failed, files: shown, .. }) = tool {
+                if let Some(Item::Tool { error: failed, files: shown, path, .. }) = tool {
                     *failed |= error;
-                    shown.extend(files);
+                    // Reading back a file the user attached: it's already shown.
+                    if !path.as_ref().is_some_and(|p| self.attached.contains(p)) {
+                        shown.extend(files);
+                    }
                 }
             }
             Event::Title(_) => {}
@@ -287,8 +298,29 @@ fn prompt(key: String, ts: i64, from: Option<String>, text: &str, mut files: Vec
     Event::Entry(Entry { key, ts, item: Item::Prompt { from, text: text.to_string(), files } }, None)
 }
 
-fn tool(key: String, ts: i64, name: String, detail: String, call: Option<String>) -> Event {
-    Event::Entry(Entry { key, ts, item: Item::Tool { name, detail, error: false, files: Vec::new() } }, call)
+/// What a tool call contributes before its result arrives.
+struct Call {
+    name: String,
+    detail: String,
+    full: String,
+    path: Option<String>,
+}
+
+fn tool(key: String, ts: i64, c: Call, call: Option<String>) -> Event {
+    let Call { name, detail, full, path } = c;
+    let item = Item::Tool { name, detail, full, path, error: false, files: Vec::new() };
+    Event::Entry(Entry { key, ts, item }, call)
+}
+
+/// Caps a tool's full input for display.
+const FULL_MAX: usize = 20_000;
+
+/// `text` as a fenced code block in `lang`, capped.
+fn fenced(lang: &str, text: &str) -> String {
+    let cut: String = text.chars().take(FULL_MAX).collect();
+    let more = if cut.len() < text.len() { "\n… (cut)" } else { "" };
+    let fence = if cut.contains("```") { "````" } else { "```" };
+    format!("{fence}{lang}\n{}{more}\n{fence}", cut.trim_end())
 }
 
 /// `mcp__linear__save_issue` -> `linear.save_issue`.

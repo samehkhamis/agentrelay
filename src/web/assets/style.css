@@ -221,7 +221,10 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
 .tool .mark { color: var(--dim); }
 .tool.error .mark { color: var(--error); }
 .tool .tool-name { font-weight: 700; }
-.tool .tool-detail { overflow: hidden; text-overflow: ellipsis; }
+.tool .tool-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tool.expandable { cursor: pointer; }
+.tool.expandable:hover .tool-detail { color: var(--fg); }
+.tool-full { margin: 2px 0 6px 18px; }
 
 #jump {
   position: absolute;

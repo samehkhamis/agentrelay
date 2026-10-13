@@ -136,6 +136,13 @@ pub fn stop() -> Result<bool> {
     let Some(port) = running() else { return Ok(false) };
     call(port, "POST", "/api/stop")?;
     let _ = std::fs::remove_file(info_path());
+    // Wait for the port to free up, so an immediate `start` can bind it.
+    for _ in 0..50 {
+        if TcpStream::connect(("127.0.0.1", port)).is_err() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
     Ok(true)
 }
 
@@ -220,6 +227,13 @@ fn handle(mut req: Request, shared: &Shared) {
             let folders = shared.hub.lock().unwrap().folders();
             let list: Vec<Value> = folders.iter().map(|f| json!({ "path": f, "label": db::tilde(f) })).collect();
             respond_json(req, json!(list))
+        }
+        (Method::Get, "/api/tool") => {
+            // A tool call's full input, rendered on demand when expanded.
+            let hub = shared.hub.lock().unwrap();
+            let full = hub.channel(&arg("channel").unwrap_or_default()).and_then(|c| hub.tool_full(c, &arg("key").unwrap_or_default()));
+            drop(hub);
+            respond_json(req, json!({ "html": full.map(|f| render::markdown(&f)) }))
         }
         (Method::Get, "/api/complete") => {
             let list = shared.hub.lock().unwrap().complete(&arg("text").unwrap_or_default());
@@ -358,8 +372,9 @@ fn feed(shared: &Shared, channel: &str, v: Option<&str>) -> Value {
                     };
                     (Some(html), Value::Null, clamp)
                 }
-                Body::Tool { name, detail, error } => {
-                    (None, json!({ "name": name, "detail": detail, "error": error }), Value::Null)
+                Body::Tool { name, detail, full, error } => {
+                    let tool = json!({ "name": name, "detail": detail, "error": error, "expandable": !full.is_empty() });
+                    (None, tool, Value::Null)
                 }
             };
             json!({

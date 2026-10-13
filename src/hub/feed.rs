@@ -36,8 +36,8 @@ impl Clamp {
 
 pub enum Body<'a> {
     Markdown { text: &'a str, clamp: Clamp },
-    /// A one-line tool call.
-    Tool { name: &'a str, detail: &'a str, error: bool },
+    /// A tool call: one line, expandable to its `full` input (markdown).
+    Tool { name: &'a str, detail: &'a str, full: &'a str, error: bool },
 }
 
 pub struct Post<'a> {
@@ -116,8 +116,8 @@ fn entry_post<'a>(e: &'a Entry, author: &'a str, kind: &'a str, me: &'a str, sub
             let clamp = if sub { Clamp::Expand } else { Clamp::Off };
             post(key, e.ts, author, kind, tag, None, Body::Markdown { text, clamp })
         }
-        Item::Tool { name, detail, error, files } => {
-            let mut p = post(key, e.ts, author, kind, tag, None, Body::Tool { name, detail, error: *error });
+        Item::Tool { name, detail, full, error, files, .. } => {
+            let mut p = post(key, e.ts, author, kind, tag, None, Body::Tool { name, detail, full, error: *error });
             p.files = files.iter().map(String::as_str).collect();
             p
         }

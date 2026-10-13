@@ -16,6 +16,7 @@ let pending = []; // uploaded files waiting to be sent: {id, name, image}
 let shell = false; // shell mode: "!" typed into an empty composer
 let missing = 0; // state refreshes the open channel has been absent for
 let suggestions = []; // slash-command completions from the server
+const expanded = new Set(); // tool calls opened, by post key
 let suggestion = 0;
 
 function api(path, body) {
@@ -215,11 +216,27 @@ function renderPost(p) {
     post.append(head);
   }
   if (p.tool) {
-    const t = el("div", `tool${p.tool.error ? " error" : ""}`);
-    t.append(el("span", "mark", p.tool.error ? "✗" : "▸"), el("span", "tool-name", p.tool.name),
-      el("span", "tool-detail", p.tool.detail));
+    const t = el("div", `tool${p.tool.error ? " error" : ""}${p.tool.expandable ? " expandable" : ""}`);
+    const mark = el("span", "mark", p.tool.error ? "✗" : p.tool.expandable ? "▸" : "·");
+    t.append(mark, el("span", "tool-name", p.tool.name), el("span", "tool-detail", p.tool.detail));
     t.title = p.tool.detail;
     post.append(t);
+    if (p.tool.expandable) {
+      const detail = el("div", "tool-full body");
+      const show = async (open) => {
+        if (open && !detail.innerHTML) {
+          const r = await api(`/api/tool?${new URLSearchParams({ channel: current, key: p.key })}`);
+          detail.innerHTML = r.html || ""; // rendered and sanitized by the server
+        }
+        detail.hidden = !open;
+        if (!p.tool.error) mark.textContent = open ? "▾" : "▸";
+        open ? expanded.add(p.key) : expanded.delete(p.key);
+      };
+      detail.hidden = true;
+      t.onclick = () => show(detail.hidden);
+      if (expanded.has(p.key)) show(true); // stays open across feed refreshes
+      post.append(detail);
+    }
   } else {
     const body = el("div", `body${p.clamp ? " clamp" : ""}`);
     body.innerHTML = p.html; // rendered and sanitized by the server

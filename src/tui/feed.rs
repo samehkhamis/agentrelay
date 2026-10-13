@@ -6,7 +6,7 @@ use crate::hub::feed::{self, Body, Post};
 use crate::{theme, uploads};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use unicode_width::UnicodeWidthStr;
 
 /// Rendered post bodies by (key, width), since markdown and highlighting are
@@ -35,15 +35,25 @@ pub struct Slot {
 /// The column where post bodies (and images) start: after the gutter.
 pub const BODY_X: u16 = 2;
 
+/// A laid-out feed: its lines, rows reserved for images, and which lines are
+/// tool calls (by post key) that a click expands or collapses.
+pub struct Layout {
+    pub lines: Vec<Line<'static>>,
+    pub slots: Vec<Slot>,
+    pub tools: Vec<(usize, String)>,
+}
+
 pub fn layout(
     posts: &[Post],
     width: usize,
     cache: &mut Cache,
     mut images: Option<&mut Images>,
-) -> (Vec<Line<'static>>, Vec<Slot>) {
+    expanded: &HashSet<String>,
+) -> Layout {
     let body_width = width.saturating_sub(3).max(16);
     let mut lines = Vec::new();
     let mut slots = Vec::new();
+    let mut tools = Vec::new();
     for p in posts {
         if p.new_day {
             lines.push(Line::default());
@@ -53,8 +63,24 @@ pub fn layout(
             lines.push(Line::default());
             lines.push(gutter(p, header(p)));
         }
+        let open = expanded.contains(&p.key);
+        if matches!(&p.body, Body::Tool { full, .. } if !full.is_empty()) {
+            tools.push((lines.len(), p.key.clone()));
+        }
         let body = cache.get(&p.key, body_width, || render_body(&p.body, body_width));
+        let first = lines.len();
         lines.extend(body.iter().map(|l| gutter(p, l.clone())));
+        if open {
+            // The tool line's mark: ▸ collapsed, ▾ expanded.
+            if let Some(mark) = lines[first].spans.iter_mut().find(|s| s.content == "▸ ") {
+                mark.content = "▾ ".into();
+            }
+        }
+        if let (true, Body::Tool { full, .. }) = (open, &p.body) {
+            let key = format!("{}:full", p.key);
+            let detail = cache.get(&key, body_width, || markdown::render(full, body_width.saturating_sub(2)));
+            lines.extend(detail.iter().map(|l| gutter(p, indent(l.clone()))));
+        }
         for f in &p.files {
             let name = uploads::display_name(std::path::Path::new(f));
             lines.push(gutter(p, Line::styled(format!("📎 {name}"), Style::new().fg(theme::t().link))));
@@ -64,7 +90,12 @@ pub fn layout(
             }
         }
     }
-    (lines, slots)
+    Layout { lines, slots, tools }
+}
+
+fn indent(mut l: Line<'static>) -> Line<'static> {
+    l.spans.insert(0, Span::raw("  "));
+    l
 }
 
 fn day_divider(label: &str, width: usize) -> Line<'static> {
@@ -112,8 +143,14 @@ fn render_body(body: &Body, width: usize) -> Vec<Line<'static>> {
             }
             lines
         }
-        Body::Tool { name, detail, error } => {
-            let (mark, color) = if *error { ("✗ ", theme::t().error) } else { ("▸ ", theme::t().dim) };
+        Body::Tool { name, detail, full, error } => {
+            // ▸ collapsed, ▾ expanded (drawn by layout), ✗ failed; · nothing to expand.
+            let mark = match (*error, full.is_empty()) {
+                (true, _) => "✗ ",
+                (false, true) => "· ",
+                (false, false) => "▸ ",
+            };
+            let color = if *error { theme::t().error } else { theme::t().dim };
             let mut detail = detail.to_string();
             let room = width.saturating_sub(name.width() + 4);
             if detail.width() > room {

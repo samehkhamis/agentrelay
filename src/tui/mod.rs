@@ -54,6 +54,11 @@ pub struct App {
     feed_height: usize,
     sidebar_area: Rect,
     feed_area: Rect,
+    /// Expanded tool calls, by post key; and the tool lines on screen
+    /// (screen row, key) plus every tool in the open feed, for clicks and Ctrl+E.
+    expanded: HashSet<String>,
+    tool_rows: Vec<(u16, String)>,
+    feed_tools: Vec<String>,
     /// Sidebar screen row -> channel id, for clicks.
     sidebar_rows: Vec<(u16, String)>,
     toast: Option<(String, Instant)>,
@@ -96,6 +101,9 @@ impl App {
             sidebar_area: Rect::default(),
             feed_area: Rect::default(),
             sidebar_rows: Vec::new(),
+            expanded: HashSet::new(),
+            tool_rows: Vec::new(),
+            feed_tools: Vec::new(),
             toast: Some(("discovering agents…".into(), Instant::now())),
             sound: sound::enabled_by_default(),
             awaiting: HashSet::new(),
@@ -330,6 +338,14 @@ impl App {
         let page = self.feed_height.saturating_sub(2).max(1);
         match k.code {
             KeyCode::Char('c' | 'q') if ctrl => self.quit = true,
+            KeyCode::Char('e') if ctrl => {
+                // Expand every tool call in the open feed, or collapse them all.
+                if self.feed_tools.iter().any(|k| self.expanded.contains(k)) {
+                    self.expanded.clear();
+                } else {
+                    self.expanded.extend(self.feed_tools.iter().cloned());
+                }
+            }
             KeyCode::Char('t') if ctrl => {
                 let name = self.hub.cycle_theme()?;
                 self.notify(format!("theme: {name} · Ctrl+T for the next"));
@@ -365,6 +381,12 @@ impl App {
             MouseEventKind::ScrollDown if in_feed => self.scroll = self.scroll.saturating_sub(3),
             MouseEventKind::ScrollUp if in_sidebar => self.move_selection(-1),
             MouseEventKind::ScrollDown if in_sidebar => self.move_selection(1),
+            MouseEventKind::Down(MouseButton::Left) if in_feed => {
+                let clicked = self.tool_rows.iter().find(|(y, _)| *y == row).map(|(_, k)| k.clone());
+                if let Some(key) = clicked.filter(|k| !self.expanded.remove(k)) {
+                    self.expanded.insert(key);
+                }
+            }
             MouseEventKind::Down(MouseButton::Left) if in_sidebar => {
                 if let Some((_, id)) = self.sidebar_rows.iter().find(|(y, _)| *y == row).cloned() {
                     self.select(&id);

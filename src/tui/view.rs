@@ -77,7 +77,7 @@ impl App {
         }
         rows.push((Line::styled("  ＋ new agent", Style::new().fg(theme::t().sidebar_fg)), Some(super::NEW_AGENT)));
         rows.push((Line::default(), None));
-        rows.push((Line::styled(" Tab switch · ! shell · Ctrl+T theme", dim), None));
+        rows.push((Line::styled(" Tab switch · ! shell · ^E tools · ^T theme", dim), None));
 
         // Keep the selected row on screen.
         let h = area.height as usize;
@@ -167,10 +167,12 @@ impl App {
     fn draw_feed(&mut self, f: &mut Frame, area: Rect) {
         let chan = self.current().clone();
         let posts = self.hub.posts(&chan);
-        let (mut lines, slots) = if posts.is_empty() {
-            (vec![Line::default(), Line::styled(format!(" {}", self.hub.empty_hint(&chan)), Style::new().fg(theme::t().dim))], Vec::new())
+        let feed::Layout { mut lines, slots, tools } = if posts.is_empty() {
+            let hint = Line::styled(format!(" {}", self.hub.empty_hint(&chan)), Style::new().fg(theme::t().dim));
+            feed::Layout { lines: vec![Line::default(), hint], slots: Vec::new(), tools: Vec::new() }
         } else {
-            feed::layout(&posts, area.width.saturating_sub(1) as usize, &mut self.cache, self.images.as_mut())
+            let width = area.width.saturating_sub(1) as usize;
+            feed::layout(&posts, width, &mut self.cache, self.images.as_mut(), &self.expanded)
         };
         drop(posts);
 
@@ -180,6 +182,12 @@ impl App {
         let start = lines.len().saturating_sub(h + self.scroll);
         let end = (start + h).min(lines.len());
         f.render_widget(Paragraph::new(lines.drain(start..end).collect::<Vec<_>>()), area);
+        self.tool_rows = tools
+            .iter()
+            .filter(|(line, _)| (start..end).contains(line))
+            .map(|(line, key)| (area.y + (line - start) as u16, key.clone()))
+            .collect();
+        self.feed_tools = tools.into_iter().map(|(_, key)| key).collect();
         // Images go into their reserved rows when those are fully on screen.
         if let Some(images) = self.images.as_mut() {
             for s in slots.iter().filter(|s| s.line >= start && s.line + s.rows as usize <= end) {

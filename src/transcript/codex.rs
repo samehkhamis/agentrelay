@@ -1,6 +1,6 @@
 //! Codex rollout lines: `response_item` messages and tool calls.
 
-use super::{display_name, first_string, images, one_line, parse_ts, prompt, text_of, tail_lines, tool, Entry, Event, Item, Opts};
+use super::{display_name, fenced, first_string, images, one_line, parse_ts, prompt, text_of, tail_lines, tool, Call, Entry, Event, Item, Opts};
 use serde_json::Value;
 use std::path::Path;
 
@@ -45,21 +45,27 @@ pub(super) fn parse(v: &Value, opts: Opts) -> Vec<Event> {
                 ns => format!("{ns}.{}", field("name")),
             };
             let args: Value = serde_json::from_str(field("arguments")).unwrap_or(Value::Null);
-            let detail = command(args.get("cmd").or(args.get("command"))).unwrap_or_else(|| first_string(&args));
-            Some(tool(key, ts, name, detail, call))
+            let cmd = args.get("cmd").or(args.get("command"));
+            let detail = command(cmd).unwrap_or_else(|| first_string(&args));
+            let full = match cmd {
+                Some(Value::String(c)) => fenced("bash", c),
+                _ => fenced("json", &serde_json::to_string_pretty(&args).unwrap_or_default()),
+            };
+            Some(tool(key, ts, Call { name, detail, full, path: None }, call))
         }
         "custom_tool_call" => {
             let input = field("input");
-            let detail = match field("name") {
-                "exec" => exec_summary(input),
-                "apply_patch" => patch_files(input),
-                _ => one_line(input),
+            let (detail, full) = match field("name") {
+                "exec" => (exec_summary(input), fenced("js", input)),
+                "apply_patch" => (patch_files(input), fenced("diff", input)),
+                _ => (one_line(input), fenced("", input)),
             };
-            Some(tool(key, ts, field("name").to_string(), detail, call))
+            Some(tool(key, ts, Call { name: field("name").to_string(), detail, full, path: None }, call))
         }
         "local_shell_call" => {
             let detail = command(p.pointer("/action/command")).unwrap_or_default();
-            Some(tool(key, ts, "shell".into(), detail, call))
+            let full = fenced("bash", &detail);
+            Some(tool(key, ts, Call { name: "shell".into(), detail, full, path: None }, call))
         }
         _ => None,
     };
