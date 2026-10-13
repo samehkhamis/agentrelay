@@ -327,6 +327,7 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
     box-shadow: 0 0 24px rgba(0, 0, 0, .35);
   }
   body.drawer #sidebar { transform: none; }
+  #sidebar.dragging { transition: none; }
   body.drawer #backdrop { display: block; position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .45); }
   #menu { display: block; }
   #header { gap: 6px; min-height: 52px; padding: 0 12px; padding-top: env(safe-area-inset-top); }

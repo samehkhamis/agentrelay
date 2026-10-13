@@ -458,6 +458,39 @@ $("new-form").onsubmit = async (e) => {
 $("menu").onclick = () => document.body.classList.toggle("drawer");
 $("backdrop").onclick = () => document.body.classList.remove("drawer");
 
+// Swipe the drawer left to close it (it follows the finger), or right from
+// the screen's left edge to open it.
+const SWIPE = 60; // px to commit
+const phone = matchMedia("(max-width: 760px)"); // the sidebar is a drawer only here
+let swipe = null;
+document.addEventListener("touchstart", (e) => {
+  if (!phone.matches) return;
+  const open = document.body.classList.contains("drawer");
+  const x = e.touches[0].clientX;
+  if (open || x < 24) swipe = { x0: x, y0: e.touches[0].clientY, open, dx: 0 };
+}, { passive: true });
+document.addEventListener("touchmove", (e) => {
+  if (!swipe) return;
+  const dx = e.touches[0].clientX - swipe.x0;
+  const dy = e.touches[0].clientY - swipe.y0;
+  if (Math.abs(dy) > Math.abs(dx) && !swipe.dx) {
+    swipe = null; // a vertical scroll, not a swipe
+    return;
+  }
+  swipe.dx = dx;
+  const width = $("sidebar").offsetWidth;
+  const offset = swipe.open ? Math.min(0, dx) : Math.min(0, dx - width);
+  $("sidebar").classList.add("dragging");
+  $("sidebar").style.transform = `translateX(${offset}px)`;
+}, { passive: true });
+document.addEventListener("touchend", () => {
+  if (!swipe) return;
+  $("sidebar").classList.remove("dragging");
+  $("sidebar").style.transform = "";
+  if (swipe.open && swipe.dx < -SWIPE) document.body.classList.remove("drawer");
+  if (!swipe.open && swipe.dx > SWIPE) document.body.classList.add("drawer");
+  swipe = null;
+});
 
 function autosize() {
   const input = $("input");
