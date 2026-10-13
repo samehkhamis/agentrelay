@@ -45,7 +45,7 @@ impl App {
         self.draw_feed(f, body);
         self.viewer_area = Rect::default();
         if let (Some(v), Some(pane)) = (self.viewer.as_mut(), pane) {
-            v.draw(f, pane);
+            v.draw(f, pane, self.focus == super::Focus::File);
             self.viewer_area = pane;
         }
         self.draw_composer(f, composer);
@@ -91,7 +91,7 @@ impl App {
         }
         rows.push((Line::styled("  ＋ new agent", Style::new().fg(theme::t().sidebar_fg)), Some(super::NEW_AGENT)));
         rows.push((Line::default(), None));
-        rows.push((Line::styled(" ↑ select · ! shell · ^O files · ^T theme", dim), None));
+        rows.push((Line::styled(" Alt+h/l panes · ! shell · ^O files", dim), None));
 
         // Keep the selected row on screen.
         let h = area.height as usize;
@@ -112,7 +112,9 @@ impl App {
     fn sidebar_row(&self, c: &Channel, width: usize) -> Line<'static> {
         let selected = c.id == self.selected;
         let unread = if selected { 0 } else { self.hub.unread(c) };
-        let base = if selected {
+        let base = if selected && self.focus == super::Focus::Sidebar {
+            Style::new().bg(theme::t().link).fg(theme::t().sidebar_bg).add_modifier(Modifier::BOLD)
+        } else if selected {
             Style::new().bg(theme::t().selected_bg).fg(Color::White)
         } else if unread > 0 {
             Style::new().fg(Color::White).add_modifier(Modifier::BOLD)
@@ -120,7 +122,7 @@ impl App {
             Style::new().fg(theme::t().sidebar_fg)
         };
         let lead = match c.section {
-            Section::Direct if selected => presence_dot(c.presence).bg(theme::t().selected_bg),
+            Section::Direct if selected => presence_dot(c.presence).bg(base.bg.unwrap_or(theme::t().selected_bg)),
             Section::Direct => presence_dot(c.presence),
             _ => Span::styled("# ", base),
         };

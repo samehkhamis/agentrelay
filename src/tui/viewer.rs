@@ -38,11 +38,12 @@ impl Viewer {
         }
     }
 
-    pub fn draw(&mut self, f: &mut Frame, area: Rect) {
+    /// Draws the pane; `focused` gives its border the accent color.
+    pub fn draw(&mut self, f: &mut Frame, area: Rect, focused: bool) {
         let th = theme::t();
         let block = Block::new()
             .borders(Borders::LEFT)
-            .border_style(Style::new().fg(th.dim))
+            .border_style(Style::new().fg(if focused { th.link } else { th.dim }))
             .title(Line::from(vec![
                 Span::styled(format!(" {} ", self.title), Style::new().fg(th.fg).bold()),
                 Span::styled("· Esc closes ", Style::new().fg(th.dim)),

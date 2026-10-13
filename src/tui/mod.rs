@@ -45,6 +45,17 @@ impl Default for Widths {
     }
 }
 
+/// The pane arrow keys act on; Alt+h / Alt+l move between them.
+#[derive(Clone, Copy, PartialEq)]
+enum Focus {
+    /// ↑↓ switch channels.
+    Sidebar,
+    /// ↑↓ select messages.
+    Feed,
+    /// ↑↓ scroll the open file.
+    File,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Border {
     Sidebar,
@@ -87,6 +98,7 @@ pub struct App {
     viewer_area: Rect,
     picker: Option<(Vec<String>, usize)>,
     widths: Widths,
+    focus: Focus,
     /// The border being dragged with the mouse.
     dragging: Option<Border>,
     /// Keyboard selection: the selected post's key, the feed's posts in
@@ -150,6 +162,7 @@ impl App {
             viewer_area: Rect::default(),
             picker: None,
             widths,
+            focus: Focus::Feed,
             dragging: None,
             cursor: None,
             cursor_placed: None,
@@ -375,7 +388,10 @@ impl App {
     fn open_file(&mut self, raw: &str) {
         let opened = self.hub.channel(&self.selected).map(|c| self.hub.open_file(c, raw));
         match opened {
-            Some(Ok((file, text))) => self.viewer = Some(viewer::Viewer::new(&file, &text)),
+            Some(Ok((file, text))) => {
+                self.viewer = Some(viewer::Viewer::new(&file, &text));
+                self.focus = Focus::File;
+            }
             Some(Err(e)) => self.notify(e.to_string()),
             None => {}
         }
@@ -474,8 +490,56 @@ impl App {
         }
     }
 
+    /// Alt+h / Alt+l: focus the pane to the left or right (sidebar, messages,
+    /// file), so ↑↓ act on it.
+    fn move_focus(&mut self, right: bool) {
+        self.focus = match (self.focus, right) {
+            (Focus::Sidebar, true) => Focus::Feed,
+            (Focus::Feed, true) if self.viewer.is_some() => Focus::File,
+            (Focus::Feed, false) | (Focus::Sidebar, false) => Focus::Sidebar,
+            (Focus::File, false) => Focus::Feed,
+            (f, _) => f,
+        };
+        if self.focus != Focus::Feed {
+            self.cursor = None;
+        }
+    }
+
+    /// ↑↓ and paging for the sidebar and file pane. False for other keys, or
+    /// when the messages have focus.
+    fn on_pane_key(&mut self, k: KeyEvent) -> bool {
+        let page = self.feed_height.saturating_sub(2).max(1);
+        match (self.focus, k.code) {
+            (Focus::Sidebar, KeyCode::Up) => self.move_selection(-1),
+            (Focus::Sidebar, KeyCode::Down) => self.move_selection(1),
+            (Focus::File, code) => {
+                let Some(v) = self.viewer.as_mut() else {
+                    self.focus = Focus::Feed;
+                    return false;
+                };
+                match code {
+                    KeyCode::Up => v.scroll = v.scroll.saturating_sub(1),
+                    KeyCode::Down => v.scroll += 1,
+                    KeyCode::PageUp => v.scroll = v.scroll.saturating_sub(page),
+                    KeyCode::PageDown => v.scroll += page,
+                    KeyCode::Esc => {
+                        self.viewer = None;
+                        self.focus = Focus::Feed;
+                    }
+                    _ => return false,
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
     fn on_key(&mut self, k: KeyEvent) -> Result<()> {
-        if self.on_picker_key(k) || self.on_suggestion_key(k)? || self.on_cursor_key(k) {
+        if k.modifiers.contains(KeyModifiers::ALT) && matches!(k.code, KeyCode::Char('h' | 'l')) {
+            self.move_focus(k.code == KeyCode::Char('l'));
+            return Ok(());
+        }
+        if self.on_picker_key(k) || self.on_suggestion_key(k)? || self.on_pane_key(k) || self.on_cursor_key(k) {
             return Ok(());
         }
         // Alt+←/→ resizes the sidebar, Alt+Shift+←/→ the file pane.
@@ -513,16 +577,6 @@ impl App {
                 }
             }
             KeyCode::Esc if self.viewer.is_some() => self.viewer = None,
-            KeyCode::PageUp if self.viewer.is_some() => {
-                if let Some(v) = self.viewer.as_mut() {
-                    v.scroll = v.scroll.saturating_sub(page);
-                }
-            }
-            KeyCode::PageDown if self.viewer.is_some() => {
-                if let Some(v) = self.viewer.as_mut() {
-                    v.scroll += page;
-                }
-            }
             KeyCode::Char('e') if ctrl => {
                 // Expand every tool call in the open feed, or collapse them all.
                 if self.feed_tools.iter().any(|k| self.expanded.contains(k)) {
@@ -539,8 +593,6 @@ impl App {
             KeyCode::Down if ctrl || alt => self.move_selection(1),
             KeyCode::Char('p') if ctrl => self.move_selection(-1),
             KeyCode::Char('n') if ctrl => self.move_selection(1),
-            KeyCode::BackTab => self.move_selection(-1),
-            KeyCode::Tab => self.move_selection(1),
             KeyCode::PageUp => self.scroll += page,
             KeyCode::PageDown => self.scroll = self.scroll.saturating_sub(page),
             KeyCode::Up if self.editor.is_empty() => self.move_cursor(true),
