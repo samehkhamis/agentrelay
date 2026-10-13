@@ -29,8 +29,13 @@ use std::time::{Duration, Instant};
 
 const POLL: Duration = Duration::from_millis(400);
 
-/// Delivery results from a background send: (delivered, failed) names.
-type Sent = (Vec<String>, Vec<String>);
+/// What background work reports back.
+enum Done {
+    /// A send: (delivered, failed) agent names.
+    Delivered(Vec<String>, Vec<String>),
+    /// A task's one-line note.
+    Note(String),
+}
 
 pub struct App {
     hub: Hub,
@@ -55,8 +60,8 @@ pub struct App {
     images: Option<images::Images>,
     /// The theme the cache was rendered in.
     cache_theme: &'static str,
-    sent_tx: Sender<Sent>,
-    sent_rx: Receiver<Sent>,
+    done_tx: Sender<Done>,
+    done_rx: Receiver<Done>,
     quit: bool,
 }
 
@@ -73,7 +78,7 @@ pub fn run() -> Result<()> {
 
 impl App {
     fn new() -> Result<App> {
-        let (sent_tx, sent_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
         Ok(App {
             hub: Hub::open()?,
             selected: "all".into(),
@@ -90,8 +95,8 @@ impl App {
             cache: feed::Cache::default(),
             images: None,
             cache_theme: theme::t().name,
-            sent_tx,
-            sent_rx,
+            done_tx,
+            done_rx,
             quit: false,
         })
     }
@@ -140,13 +145,18 @@ impl App {
         for name in &replied {
             self.awaiting.remove(name);
         }
-        while let Ok((ok, failed)) = self.sent_rx.try_recv() {
-            let mut t = format!("delivered to {}", ok.len());
-            if !failed.is_empty() {
-                t.push_str(&format!(" · failed: {}", failed.join(", ")));
+        while let Ok(done) = self.done_rx.try_recv() {
+            match done {
+                Done::Delivered(ok, failed) => {
+                    let mut t = format!("delivered to {}", ok.len());
+                    if !failed.is_empty() {
+                        t.push_str(&format!(" · failed: {}", failed.join(", ")));
+                    }
+                    self.awaiting.extend(ok);
+                    self.notify(t);
+                }
+                Done::Note(note) => self.notify(note),
             }
-            self.awaiting.extend(ok);
-            self.notify(t);
         }
         self.hub.follow(&self.selected);
         // Rendered lines carry colors; redo them when any UI switches theme.
@@ -177,6 +187,14 @@ impl App {
             None if self.pending.is_empty() => {}
             None => self.send(String::new())?,
             Some(Input::Send(body)) => self.send(body)?,
+            Some(Input::New { kind, folder, prompt }) => {
+                let task = self.hub.start_agent(&self.selected, kind, folder.as_deref(), &prompt);
+                self.background(task, format!("starting {}…", kind.as_str()));
+            }
+            Some(Input::Shell(cmd)) => {
+                let task = self.hub.shell(&self.selected, &cmd);
+                self.background(task, "running…".into());
+            }
             Some(Input::Quit) => self.quit = true,
             Some(Input::Help) => self.notify(hub::HELP),
             Some(Input::Theme(None)) => self.notify(hub::theme_list()),
@@ -195,6 +213,20 @@ impl App {
         Ok(())
     }
 
+    /// Runs a hub task off the UI thread; its note shows when done.
+    fn background(&mut self, task: Result<hub::Task>, starting: String) {
+        match task {
+            Ok(task) => {
+                self.notify(starting);
+                let tx = self.done_tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(Done::Note(task.run()));
+                });
+            }
+            Err(e) => self.notify(e.to_string()),
+        }
+    }
+
     /// Logs the message with any pending files and delivers it in the background.
     fn send(&mut self, body: String) -> Result<()> {
         let files = match self.pending.drain(..).map(|p| uploads::import(&p)).collect::<Result<Vec<_>>>() {
@@ -209,9 +241,10 @@ impl App {
             None => self.notify("nobody online here to deliver to"),
             Some(delivery) => {
                 self.notify(format!("delivering to {}…", delivery.targets.len()));
-                let tx = self.sent_tx.clone();
+                let tx = self.done_tx.clone();
                 std::thread::spawn(move || {
-                    let _ = tx.send(delivery.run());
+                    let (ok, failed) = delivery.run();
+                    let _ = tx.send(Done::Delivered(ok, failed));
                 });
             }
         }

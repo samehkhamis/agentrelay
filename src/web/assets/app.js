@@ -119,7 +119,19 @@ function renderSidebar() {
   for (const c of state.channels) {
     if (c.section !== section) {
       section = c.section;
-      nav.append(el("div", "section", `▾ ${SECTIONS[section]}`));
+      const head = el("div", "section", `▾ ${SECTIONS[section]}`);
+      if (section === "direct") {
+        const add = el("button", "add", "＋");
+        Object.assign(add, { type: "button", title: "Start an agent: /new claude|codex [folder] <prompt>" });
+        add.onclick = () => {
+          $("input").value = "/new claude ";
+          autosize();
+          $("input").focus();
+          document.body.classList.remove("drawer");
+        };
+        head.append(add);
+      }
+      nav.append(head);
     }
     const selected = c.id === current;
     const unread = selected ? 0 : c.unread;
@@ -262,7 +274,7 @@ async function submit() {
     return;
   }
   if (text === "/quit" || text === "/q") return;
-  toast("sending…");
+  toast(text.startsWith("/new") ? "starting…" : text.startsWith("!") ? "running…" : "sending…");
   const files = pending.map((f) => f.id);
   pending = [];
   renderPending();

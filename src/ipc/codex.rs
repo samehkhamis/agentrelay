@@ -6,7 +6,7 @@ use crate::db::home;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tungstenite::{Message, WebSocket};
 
@@ -57,6 +57,23 @@ impl AppServer {
             .and_then(Value::as_array)
             .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
             .unwrap_or_default())
+    }
+
+    /// Starts a thread in `cwd` without approvals or sandbox, like the user's
+    /// other sessions. It stays loaded in the daemon after this connection closes.
+    pub fn start_thread(&mut self, cwd: &Path) -> Result<String> {
+        let r = self.call(
+            "thread/start",
+            json!({ "cwd": cwd, "approvalPolicy": "never", "sandbox": "danger-full-access" }),
+        )?;
+        r.pointer("/thread/id").and_then(Value::as_str).map(str::to_string).ok_or_else(|| anyhow!("no thread id"))
+    }
+
+    /// Runs a command in the thread's shell, like `!` in Codex: the output is
+    /// recorded in the thread without starting a model turn.
+    pub fn shell_command(&mut self, thread: &str, command: &str) -> Result<()> {
+        self.call("thread/shellCommand", json!({ "threadId": thread, "command": command }))?;
+        Ok(())
     }
 
     pub fn start_turn(&mut self, thread: &str, text: &str, images: &[PathBuf]) -> Result<()> {

@@ -6,7 +6,7 @@ pub mod channels;
 pub mod feed;
 mod watcher;
 
-use crate::agents::{Agent, Kind, Presence};
+use crate::agents::{Address, Agent, Kind, Presence};
 use crate::db::{self, Msg};
 use crate::{ipc, theme};
 use crate::transcript::Tail;
@@ -22,11 +22,16 @@ use std::sync::mpsc::Receiver;
 const HISTORY: i64 = 3000;
 const STATUS_ASK: &str = "Quick status update please: what are you working on, what's done, \
                           and is anything blocked? 2-3 lines.";
-pub const HELP: &str = "commands: /status  /theme [name]  /sound  /quit";
+pub const HELP: &str =
+    "commands: /status  /new claude|codex [folder] <prompt>  !command (in a DM)  /theme [name]  /sound  /quit";
 
 /// What the user typed in a composer.
 pub enum Input {
     Send(String),
+    /// `/new claude|codex [folder] <prompt>`: start an agent.
+    New { kind: Kind, folder: Option<String>, prompt: String },
+    /// `!command`: run it in a DM's agent's folder.
+    Shell(String),
     /// `/theme name`, or `/theme` alone to list them.
     Theme(Option<String>),
     ToggleSound,
@@ -36,6 +41,24 @@ pub enum Input {
 
 pub fn parse_input(text: &str) -> Option<Input> {
     let text = text.trim();
+    if let Some(cmd) = text.strip_prefix('!') {
+        return (!cmd.trim().is_empty()).then(|| Input::Shell(cmd.trim().to_string()));
+    }
+    if let Some(rest) = text.strip_prefix("/new ") {
+        let (kind, rest) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
+        let kind = match kind {
+            "claude" => Kind::Claude,
+            "codex" => Kind::Codex,
+            _ => return Some(Input::Help),
+        };
+        let rest = rest.trim();
+        let (folder, prompt) = match rest.split_once(' ') {
+            Some((f, p)) if f.starts_with(['/', '~', '.']) => (Some(f.to_string()), p.trim()),
+            _ if rest.starts_with(['/', '~', '.']) => (Some(rest.to_string()), ""),
+            _ => (None, rest),
+        };
+        return Some(Input::New { kind, folder, prompt: prompt.to_string() });
+    }
     if let Some(rest) = text.strip_prefix("/theme") {
         let name = rest.trim();
         return Some(Input::Theme((!name.is_empty()).then(|| name.to_string())));
@@ -70,6 +93,16 @@ impl Delivery {
     /// (delivered, failed) agent names.
     pub fn run(&self) -> (Vec<String>, Vec<String>) {
         ipc::deliver(&self.targets, &self.text, &self.images)
+    }
+}
+
+/// Work to run off the UI thread (starting an agent, running a command);
+/// returns a one-line note for the UI.
+pub struct Task(Box<dyn FnOnce() -> String + Send>);
+
+impl Task {
+    pub fn run(self) -> String {
+        (self.0)()
     }
 }
 
@@ -277,5 +310,126 @@ impl Hub {
         let images = files.iter().filter(|f| uploads::is_image(f)).cloned().collect();
         self.poll()?;
         Ok((!targets.is_empty()).then_some(Delivery { targets, text, images }))
+    }
+
+    /// The folder for a new agent: the given one, else the DM agent's or the
+    /// project channel's folder.
+    fn folder(&self, chan: &Channel, given: Option<&str>) -> Result<PathBuf> {
+        let path = match given {
+            Some(f) => match f.strip_prefix('~') {
+                Some(rest) => PathBuf::from(format!("{}{rest}", db::home().display())),
+                None => PathBuf::from(f),
+            },
+            None => match self.members(chan).first() {
+                Some(a) if chan.section != Section::Top => PathBuf::from(&a.cwd),
+                _ => anyhow::bail!("say which folder: /new claude ~/code/project <prompt>"),
+            },
+        };
+        anyhow::ensure!(path.is_dir(), "no folder {}", path.display());
+        Ok(path)
+    }
+
+    /// Starts a Claude (background session) or Codex (app-server thread)
+    /// agent with a first prompt. Its DM appears once discovery finds it.
+    pub fn start_agent(&self, chan_id: &str, kind: Kind, folder: Option<&str>, prompt: &str) -> Result<Task> {
+        let chan = self.channel(chan_id).ok_or_else(|| anyhow::anyhow!("no channel"))?;
+        anyhow::ensure!(!prompt.trim().is_empty(), "give it a first prompt: /new {} <prompt>", kind.as_str());
+        let cwd = self.folder(chan, folder)?;
+        let prompt = prompt.to_string();
+        Ok(Task(Box::new(move || {
+            let shown = cwd.display().to_string().replace(&db::home().display().to_string(), "~");
+            let started = match kind {
+                Kind::Claude => ipc::claude::start(&cwd, &prompt).map(|id| format!("claude {id}")),
+                Kind::Codex => ipc::codex::AppServer::connect().and_then(|mut s| {
+                    let thread = s.start_thread(&cwd)?;
+                    s.start_turn(&thread, &prompt, &[])?;
+                    Ok("codex".to_string())
+                }),
+            };
+            match started {
+                Ok(what) => format!("started {what} in {shown}; it'll appear under Direct messages"),
+                Err(e) => format!("couldn't start {}: {e}", kind.as_str()),
+            }
+        })))
+    }
+
+    /// Runs a command for a DM's agent, like `!` in its own terminal. Codex
+    /// runs it in the thread's shell and records it there; for Claude,
+    /// agentchat runs it in the agent's folder and sends the output to it.
+    pub fn shell(&self, chan_id: &str, command: &str) -> Result<Task> {
+        let chan = self.channel(chan_id).ok_or_else(|| anyhow::anyhow!("no channel"))?;
+        let agent = match (chan.section, self.members(chan).first()) {
+            (Section::Direct, Some(a)) if a.presence != Presence::Away => (*a).clone(),
+            _ => anyhow::bail!("!commands run in a DM with an online agent"),
+        };
+        let (command, me) = (command.to_string(), self.me.clone());
+        Ok(Task(Box::new(move || {
+            let done = match &agent.address {
+                Address::Codex(thread) => {
+                    ipc::codex::AppServer::connect().and_then(|mut s| s.shell_command(thread, &command))
+                }
+                Address::Claude(pid) => {
+                    let (output, exit) = run_shell(&command, &agent.cwd);
+                    let report = ipc::shell_report(&command, &output, exit);
+                    ipc::claude::send(*pid, &ipc::compose(&me, None, &report, &[]))
+                }
+            };
+            match done {
+                Ok(()) => format!("ran in {}", agent.name),
+                Err(e) => format!("couldn't run: {e}"),
+            }
+        })))
+    }
+}
+
+/// Output cap for `!` commands, from the end.
+const SHELL_OUTPUT: usize = 16_000;
+const SHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Runs a command with the user's shell in `cwd`: (stdout and stderr, exit
+/// code; None if it didn't finish within the timeout).
+fn run_shell(command: &str, cwd: &str) -> (String, Option<i32>) {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    let child = std::process::Command::new(shell)
+        .args(["-lc", command])
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+    let child = match child {
+        Ok(c) => c,
+        Err(e) => return (e.to_string(), None),
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(SHELL_TIMEOUT) {
+        Ok(Ok(out)) => {
+            let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+            let start = text.char_indices().rev().nth(SHELL_OUTPUT).map_or(0, |(i, _)| i);
+            (text[start..].to_string(), out.status.code())
+        }
+        Ok(Err(e)) => (e.to_string(), None),
+        Err(_) => (format!("still running after {}s", SHELL_TIMEOUT.as_secs()), None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_input, Input};
+    use crate::agents::Kind;
+
+    #[test]
+    fn parses_new_and_shell() {
+        match parse_input("/new codex ~/code/infra fix the CI") {
+            Some(Input::New { kind: Kind::Codex, folder: Some(f), prompt }) => {
+                assert_eq!((f.as_str(), prompt.as_str()), ("~/code/infra", "fix the CI"))
+            }
+            _ => panic!("expected /new with a folder"),
+        }
+        assert!(matches!(parse_input("/new claude look around"), Some(Input::New { folder: None, .. })));
+        assert!(matches!(parse_input("!git status"), Some(Input::Shell(c)) if c == "git status"));
     }
 }

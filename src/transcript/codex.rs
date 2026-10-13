@@ -25,6 +25,9 @@ pub(super) fn parse(v: &Value, opts: Opts) -> Vec<Event> {
                     .filter(|i| opts.images && i.get("type").and_then(Value::as_str) == Some("input_image"))
                     .filter_map(|i| images::store_data_url(i.get("image_url")?.as_str()?))
                     .collect();
+                if let Some(report) = shell_command(&text) {
+                    return vec![prompt(key, ts, None, &report, Vec::new())];
+                }
                 // Environment context and AGENTS.md come in as user messages too.
                 let injected = text.starts_with('<') || text.starts_with("# AGENTS.md");
                 let empty = text.trim().is_empty() && files.is_empty();
@@ -61,6 +64,18 @@ pub(super) fn parse(v: &Value, opts: Opts) -> Vec<Event> {
         _ => None,
     };
     event.into_iter().collect()
+}
+
+/// A `!command` run in the thread (`thread/shellCommand` or Codex's `!`),
+/// recorded as a `<user_shell_command>` block, in agentchat's report form.
+fn shell_command(text: &str) -> Option<String> {
+    let inner = text.strip_prefix("<user_shell_command>")?;
+    let between = |open: &str, close: &str| inner.split_once(open).and_then(|(_, r)| r.split_once(close)).map(|(v, _)| v);
+    let command = between("<command>", "</command>")?.trim();
+    let result = between("<result>", "</result>").unwrap_or("");
+    let exit = result.lines().find_map(|l| l.strip_prefix("Exit code: ")?.trim().parse().ok());
+    let output = result.split_once("Output:\n").map_or("", |(_, o)| o);
+    Some(crate::ipc::shell_report(command, output, exit))
 }
 
 /// A command given as a string or an argv array.

@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 const TAG: &str = "cross-session-message";
@@ -35,6 +36,27 @@ pub fn send(pid: u32, text: &str) -> Result<()> {
     s.write_all(format!("{auth}\n{msg}\n").as_bytes())?;
     s.shutdown(std::net::Shutdown::Write)?;
     Ok(())
+}
+
+/// Starts a background Claude Code session in `cwd` with a first prompt, in
+/// bypass-permissions mode like the user's other sessions (supported
+/// `claude --bg`; there is no socket call for creating a session). Returns
+/// its short id. Claude refuses folders whose trust prompt wasn't accepted,
+/// and says so; that message is the error.
+pub fn start(cwd: &Path, prompt: &str) -> Result<String> {
+    let out = Command::new("claude")
+        .args(["--bg", "--permission-mode", "bypassPermissions", prompt])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .output()
+        .context("running claude")?;
+    let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    if !out.status.success() {
+        return Err(anyhow!("{}", text.trim()));
+    }
+    // "backgrounded · ecb5563e"
+    let id = text.lines().find_map(|l| l.split_once("backgrounded · ").map(|(_, id)| id.trim().to_string()));
+    Ok(id.unwrap_or_default())
 }
 
 /// The newest `<pid>.<hash>.key` holds the token for the socket in use.

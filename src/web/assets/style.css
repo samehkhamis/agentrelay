@@ -36,7 +36,18 @@ body {
 .workspace-name { font-weight: 800; font-size: 18px; color: var(--sidebar-fg); }
 .workspace-me { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--sidebar-dim); }
 #channels { flex: 1; overflow-y: auto; padding: 8px 0 12px; }
-.section { margin: 14px 16px 4px; font-size: 13px; color: var(--sidebar-dim); }
+.section { display: flex; align-items: center; justify-content: space-between; margin: 14px 16px 4px; font-size: 13px; color: var(--sidebar-dim); }
+.section .add {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--sidebar-fg);
+  font-size: 14px;
+  cursor: pointer;
+}
+.section .add:hover { background: rgba(255, 255, 255, .12); }
 .row {
   display: flex;
   align-items: center;

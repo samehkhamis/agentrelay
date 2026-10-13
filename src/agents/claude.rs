@@ -1,6 +1,6 @@
 //! Claude Code sessions, from the supported `claude agents --json`.
 
-use super::{group_of, Address, Agent, Kind, Presence};
+use super::{group_for, Address, Agent, Kind, Presence};
 use crate::db::home;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -27,7 +27,7 @@ pub fn list() -> Vec<Agent> {
                 .and_then(Value::as_str)
                 .and_then(|sid| find_transcript(&projects, &cwd, sid));
             Some(Agent {
-                group: group_of(&name),
+                group: group_for(&name, &cwd),
                 name,
                 kind: Kind::Claude,
                 presence,

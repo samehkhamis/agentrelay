@@ -92,6 +92,14 @@ pub fn group_of(name: &str) -> String {
     }
 }
 
+/// The project an agent belongs to: from its name (`webapp-74`), or for
+/// names that aren't `folder-hex` (background sessions are named after their
+/// first prompt), from its folder.
+pub fn group_for(name: &str, cwd: &str) -> String {
+    let group = group_of(name);
+    if group == name && !cwd.is_empty() { basename(cwd) } else { group }
+}
+
 fn basename(p: &str) -> String {
     Path::new(p).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string())
 }

@@ -24,6 +24,15 @@ pub fn compose(from: &str, channel: Option<&str>, body: &str, files: &[PathBuf])
     text
 }
 
+/// How a shell command and its output read, both in what agents receive and
+/// in DMs: the command, the output in a code block, and the exit code.
+pub fn shell_report(command: &str, output: &str, exit: Option<i32>) -> String {
+    let exit = exit.map_or("did not finish".into(), |c| format!("exit {c}"));
+    let output = output.trim_end();
+    let fence = if output.contains("```") { "````" } else { "```" };
+    format!("ran `$ {}`\n{fence}\n{output}\n{fence}\n{exit}", command.trim())
+}
+
 /// A message as [`compose`] wrote it.
 pub struct Incoming<'a> {
     /// `alex in #webapp`, or `alex` for a DM.

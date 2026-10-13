@@ -334,6 +334,14 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
         None if !files.is_empty() => String::new(),
         Some(Input::Help) => return json!({ "note": hub::HELP }),
         Some(Input::Theme(None)) => return json!({ "note": hub::theme_list() }),
+        Some(Input::New { kind, folder, prompt }) => {
+            let task = shared.hub.lock().unwrap().start_agent(channel, kind, folder.as_deref(), &prompt);
+            return json!({ "note": task.map_or_else(|e| e.to_string(), hub::Task::run) });
+        }
+        Some(Input::Shell(cmd)) => {
+            let task = shared.hub.lock().unwrap().shell(channel, &cmd);
+            return json!({ "note": task.map_or_else(|e| e.to_string(), hub::Task::run) });
+        }
         Some(Input::Theme(Some(name))) => return set_theme(shared, &name),
         _ => return json!({}),
     };
