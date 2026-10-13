@@ -29,14 +29,27 @@ impl App {
         let [header, body, composer] =
             Layout::vertical([Constraint::Length(3), Constraint::Min(1), Constraint::Length(3)]).areas(main);
         self.sidebar_area = side;
+        // An open file takes the right part of the feed.
+        let (body, pane) = match self.viewer {
+            Some(_) => {
+                let [left, right] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(body);
+                (left, Some(right))
+            }
+            None => (body, None),
+        };
         self.feed_area = body;
         let th = theme::t();
         f.render_widget(Block::new().style(Style::new().bg(th.bg).fg(th.fg)), main);
         self.draw_sidebar(f, side);
         self.draw_header(f, header);
         self.draw_feed(f, body);
+        if let (Some(v), Some(pane)) = (self.viewer.as_mut(), pane) {
+            v.draw(f, pane);
+            self.viewer_area = pane;
+        }
         self.draw_composer(f, composer);
         self.draw_suggestions(f, composer);
+        self.draw_picker(f, composer);
         // Reading the bottom of a channel marks it read, in every UI.
         if self.scroll == 0 {
             let id = self.selected.clone();
@@ -77,7 +90,7 @@ impl App {
         }
         rows.push((Line::styled("  ＋ new agent", Style::new().fg(theme::t().sidebar_fg)), Some(super::NEW_AGENT)));
         rows.push((Line::default(), None));
-        rows.push((Line::styled(" Tab switch · ! shell · ^E tools · ^T theme", dim), None));
+        rows.push((Line::styled(" ! shell · ^E tools · ^O files · ^T theme", dim), None));
 
         // Keep the selected row on screen.
         let h = area.height as usize;
@@ -185,9 +198,9 @@ impl App {
         self.tool_rows = tools
             .iter()
             .filter(|(line, _)| (start..end).contains(line))
-            .map(|(line, key)| (area.y + (line - start) as u16, key.clone()))
+            .map(|(line, t)| (area.y + (line - start) as u16, t.clone()))
             .collect();
-        self.feed_tools = tools.into_iter().map(|(_, key)| key).collect();
+        self.feed_tools = tools.into_iter().filter(|(_, t)| t.expandable).map(|(_, t)| t.key).collect();
         // Images go into their reserved rows when those are fully on screen.
         if let Some(images) = self.images.as_mut() {
             for s in slots.iter().filter(|s| s.line >= start && s.line + s.rows as usize <= end) {
@@ -239,6 +252,33 @@ impl App {
 }
 
 impl App {
+    /// The Ctrl+O list of files the feed mentions, just above the composer.
+    fn draw_picker(&self, f: &mut Frame, composer: Rect) {
+        let Some((items, sel)) = &self.picker else { return };
+        let th = theme::t();
+        let shown = items.len().min(10);
+        let first = sel.saturating_sub(shown - 1);
+        let height = shown as u16 + 2;
+        let area = Rect::new(composer.x, composer.y.saturating_sub(height), composer.width.min(90), height);
+        let rows: Vec<Line> = items
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(shown)
+            .map(|(i, raw)| {
+                let style = if i == *sel { Style::new().bg(th.selected_bg).fg(Color::White) } else { Style::new().fg(th.link) };
+                Line::styled(format!(" {raw} "), style)
+            })
+            .collect();
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(Style::new().fg(th.dim))
+            .title(Span::styled(" files mentioned · Enter opens · Esc ", Style::new().fg(th.dim)))
+            .style(Style::new().bg(th.bg).fg(th.fg));
+        f.render_widget(Clear, area);
+        f.render_widget(Paragraph::new(rows).block(block), area);
+    }
+
     /// The autocomplete list, just above the composer.
     fn draw_suggestions(&self, f: &mut Frame, composer: Rect) {
         let list = self.suggestions();

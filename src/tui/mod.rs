@@ -10,6 +10,7 @@ mod images;
 mod markdown;
 mod paste;
 mod view;
+mod viewer;
 
 use crate::hub::{self, Hub, Input};
 use crate::{sound, theme, uploads};
@@ -57,8 +58,12 @@ pub struct App {
     /// Expanded tool calls, by post key; and the tool lines on screen
     /// (screen row, key) plus every tool in the open feed, for clicks and Ctrl+E.
     expanded: HashSet<String>,
-    tool_rows: Vec<(u16, String)>,
+    tool_rows: Vec<(u16, feed::ToolRow)>,
     feed_tools: Vec<String>,
+    /// The open file pane, and the Ctrl+O file list (mentions, highlighted).
+    viewer: Option<viewer::Viewer>,
+    viewer_area: Rect,
+    picker: Option<(Vec<String>, usize)>,
     /// Sidebar screen row -> channel id, for clicks.
     sidebar_rows: Vec<(u16, String)>,
     toast: Option<(String, Instant)>,
@@ -104,6 +109,9 @@ impl App {
             expanded: HashSet::new(),
             tool_rows: Vec::new(),
             feed_tools: Vec::new(),
+            viewer: None,
+            viewer_area: Rect::default(),
+            picker: None,
             toast: Some(("discovering agents…".into(), Instant::now())),
             sound: sound::enabled_by_default(),
             awaiting: HashSet::new(),
@@ -319,8 +327,38 @@ impl App {
         Ok(true)
     }
 
+    /// Opens a file the open feed mentions in the file pane.
+    fn open_file(&mut self, raw: &str) {
+        let opened = self.hub.channel(&self.selected).map(|c| self.hub.open_file(c, raw));
+        match opened {
+            Some(Ok((file, text))) => self.viewer = Some(viewer::Viewer::new(&file, &text)),
+            Some(Err(e)) => self.notify(e.to_string()),
+            None => {}
+        }
+    }
+
+    /// Keys while the Ctrl+O file list is open. False if the list isn't open.
+    fn on_picker_key(&mut self, k: KeyEvent) -> bool {
+        let Some((items, sel)) = self.picker.as_mut() else { return false };
+        let n = items.len().max(1);
+        match k.code {
+            KeyCode::Up => *sel = (*sel + n - 1) % n,
+            KeyCode::Down => *sel = (*sel + 1) % n,
+            KeyCode::Enter => {
+                let raw = items.get(*sel).cloned();
+                self.picker = None;
+                if let Some(raw) = raw {
+                    self.open_file(&raw);
+                }
+            }
+            KeyCode::Esc => self.picker = None,
+            _ => {}
+        }
+        true
+    }
+
     fn on_key(&mut self, k: KeyEvent) -> Result<()> {
-        if self.on_suggestion_key(k)? {
+        if self.on_picker_key(k) || self.on_suggestion_key(k)? {
             return Ok(());
         }
         let before = self.editor.text().to_string();
@@ -338,6 +376,25 @@ impl App {
         let page = self.feed_height.saturating_sub(2).max(1);
         match k.code {
             KeyCode::Char('c' | 'q') if ctrl => self.quit = true,
+            KeyCode::Char('o') if ctrl => {
+                let files = self.hub.channel(&self.selected).map(|c| self.hub.mentioned_files(c)).unwrap_or_default();
+                if files.is_empty() {
+                    self.notify("no files mentioned here");
+                } else {
+                    self.picker = Some((files.into_iter().map(|(raw, _)| raw).collect(), 0));
+                }
+            }
+            KeyCode::Esc if self.viewer.is_some() => self.viewer = None,
+            KeyCode::PageUp if self.viewer.is_some() => {
+                if let Some(v) = self.viewer.as_mut() {
+                    v.scroll = v.scroll.saturating_sub(page);
+                }
+            }
+            KeyCode::PageDown if self.viewer.is_some() => {
+                if let Some(v) = self.viewer.as_mut() {
+                    v.scroll += page;
+                }
+            }
             KeyCode::Char('e') if ctrl => {
                 // Expand every tool call in the open feed, or collapse them all.
                 if self.feed_tools.iter().any(|k| self.expanded.contains(k)) {
@@ -375,6 +432,15 @@ impl App {
     fn on_mouse(&mut self, kind: MouseEventKind, col: u16, row: u16) {
         let pos = Position::new(col, row);
         let in_feed = self.feed_area.contains(pos);
+        let in_viewer = self.viewer.is_some() && self.viewer_area.contains(pos);
+        if let Some(v) = self.viewer.as_mut().filter(|_| in_viewer) {
+            match kind {
+                MouseEventKind::ScrollUp => v.scroll = v.scroll.saturating_sub(3),
+                MouseEventKind::ScrollDown => v.scroll += 3,
+                _ => {}
+            }
+            return;
+        }
         let in_sidebar = self.sidebar_area.contains(pos);
         match kind {
             MouseEventKind::ScrollUp if in_feed => self.scroll += 3,
@@ -382,9 +448,14 @@ impl App {
             MouseEventKind::ScrollUp if in_sidebar => self.move_selection(-1),
             MouseEventKind::ScrollDown if in_sidebar => self.move_selection(1),
             MouseEventKind::Down(MouseButton::Left) if in_feed => {
-                let clicked = self.tool_rows.iter().find(|(y, _)| *y == row).map(|(_, k)| k.clone());
-                if let Some(key) = clicked.filter(|k| !self.expanded.remove(k)) {
-                    self.expanded.insert(key);
+                let clicked = self.tool_rows.iter().find(|(y, _)| *y == row).map(|(_, t)| t.clone());
+                match clicked {
+                    // A call with nothing to expand but a file (Read): open the file.
+                    Some(feed::ToolRow { file: Some(file), expandable: false, .. }) => self.open_file(&file),
+                    Some(t) if t.expandable && !self.expanded.remove(&t.key) => {
+                        self.expanded.insert(t.key);
+                    }
+                    _ => {}
                 }
             }
             MouseEventKind::Down(MouseButton::Left) if in_sidebar => {

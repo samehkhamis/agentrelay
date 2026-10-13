@@ -3,8 +3,8 @@
 use super::images::Images;
 use super::markdown;
 use crate::hub::feed::{self, Body, Post};
-use crate::{theme, uploads};
-use ratatui::style::Style;
+use crate::{files, theme, uploads};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::collections::{HashMap, HashSet};
 use unicode_width::UnicodeWidthStr;
@@ -35,12 +35,20 @@ pub struct Slot {
 /// The column where post bodies (and images) start: after the gutter.
 pub const BODY_X: u16 = 2;
 
-/// A laid-out feed: its lines, rows reserved for images, and which lines are
-/// tool calls (by post key) that a click expands or collapses.
+/// A tool call's line, for clicks: expand it, or open its file.
+#[derive(Clone)]
+pub struct ToolRow {
+    pub key: String,
+    pub file: Option<String>,
+    pub expandable: bool,
+}
+
+/// A laid-out feed: its lines, rows reserved for images, and the tool call
+/// lines (by line index).
 pub struct Layout {
     pub lines: Vec<Line<'static>>,
     pub slots: Vec<Slot>,
-    pub tools: Vec<(usize, String)>,
+    pub tools: Vec<(usize, ToolRow)>,
 }
 
 pub fn layout(
@@ -64,10 +72,12 @@ pub fn layout(
             lines.push(gutter(p, header(p)));
         }
         let open = expanded.contains(&p.key);
-        if matches!(&p.body, Body::Tool { full, .. } if !full.is_empty()) {
-            tools.push((lines.len(), p.key.clone()));
+        if let Body::Tool { full, path, .. } = &p.body {
+            let file = path.filter(|f| files::resolve(p.cwd.unwrap_or(""), f).is_some()).map(str::to_string);
+            tools.push((lines.len(), ToolRow { key: p.key.clone(), file, expandable: !full.is_empty() }));
         }
-        let body = cache.get(&p.key, body_width, || render_body(&p.body, body_width));
+        let is_file = |c: &str| files::resolve(p.cwd.unwrap_or(""), c).is_some();
+        let body = cache.get(&p.key, body_width, || render_body(&p.body, body_width, &is_file));
         let first = lines.len();
         lines.extend(body.iter().map(|l| gutter(p, l.clone())));
         if open {
@@ -78,7 +88,7 @@ pub fn layout(
         }
         if let (true, Body::Tool { full, .. }) = (open, &p.body) {
             let key = format!("{}:full", p.key);
-            let detail = cache.get(&key, body_width, || markdown::render(full, body_width.saturating_sub(2)));
+            let detail = cache.get(&key, body_width, || markdown::render(full, body_width.saturating_sub(2), &is_file));
             lines.extend(detail.iter().map(|l| gutter(p, indent(l.clone()))));
         }
         for f in &p.files {
@@ -133,17 +143,17 @@ fn gutter(p: &Post, mut l: Line<'static>) -> Line<'static> {
     l
 }
 
-fn render_body(body: &Body, width: usize) -> Vec<Line<'static>> {
+fn render_body(body: &Body, width: usize, is_file: &dyn Fn(&str) -> bool) -> Vec<Line<'static>> {
     match body {
         Body::Markdown { text, clamp } => {
-            let mut lines = markdown::render(text, width);
+            let mut lines = markdown::render(text, width, is_file);
             if let Some(hint) = clamp.hint().filter(|_| lines.len() > feed::STATUS_LINES) {
                 lines.truncate(feed::STATUS_LINES);
                 lines.push(Line::styled(hint, Style::new().fg(theme::t().dim).italic()));
             }
             lines
         }
-        Body::Tool { name, detail, full, error } => {
+        Body::Tool { name, detail, full, path, error } => {
             // ▸ collapsed, ▾ expanded (drawn by layout), ✗ failed; · nothing to expand.
             let mark = match (*error, full.is_empty()) {
                 (true, _) => "✗ ",
@@ -159,7 +169,12 @@ fn render_body(body: &Body, width: usize) -> Vec<Line<'static>> {
             vec![Line::from(vec![
                 Span::styled(mark, Style::new().fg(color)),
                 Span::styled(name.to_string(), Style::new().fg(theme::t().dim).bold()),
-                Span::styled(format!("  {detail}"), Style::new().fg(theme::t().dim)),
+                Span::raw("  "),
+                // A file the tool worked on reads as a link, like mentions in text.
+                match path {
+                    Some(_) => Span::styled(detail, Style::new().fg(theme::t().link).add_modifier(Modifier::UNDERLINED)),
+                    None => Span::styled(detail, Style::new().fg(theme::t().dim)),
+                },
             ])]
         }
     }

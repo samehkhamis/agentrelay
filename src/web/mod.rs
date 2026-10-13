@@ -13,7 +13,7 @@ mod render;
 
 use crate::hub::feed::{self, Body, Clamp};
 use crate::hub::{self, Hub, Input};
-use crate::{db, theme, uploads};
+use crate::{db, files, theme, uploads};
 use anyhow::{anyhow, Result};
 use ratatui::style::Color;
 use serde_json::{json, Value};
@@ -233,7 +233,28 @@ fn handle(mut req: Request, shared: &Shared) {
             let hub = shared.hub.lock().unwrap();
             let full = hub.channel(&arg("channel").unwrap_or_default()).and_then(|c| hub.tool_full(c, &arg("key").unwrap_or_default()));
             drop(hub);
-            respond_json(req, json!({ "html": full.map(|f| render::markdown(&f)) }))
+            respond_json(req, json!({ "html": full.map(|f| render::markdown(&f, &|_| false)) }))
+        }
+        (Method::Get, "/api/file") => {
+            // A file a feed mentions, highlighted for the file panel.
+            let mut hub = shared.hub.lock().unwrap();
+            let channel = arg("channel").unwrap_or_default();
+            hub.follow(&channel);
+            let opened = match hub.channel(&channel) {
+                Some(c) => hub.open_file(c, &arg("file").unwrap_or_default()),
+                None => Err(anyhow!("no channel")),
+            };
+            drop(hub);
+            let v = match opened {
+                Ok((f, text)) => json!({
+                    "path": db::tilde(&f.path.display().to_string()),
+                    "full": f.path,
+                    "line": f.line,
+                    "html": render::file(&files::lang(&f.path), &text, f.line),
+                }),
+                Err(e) => json!({ "error": e.to_string() }),
+            };
+            respond_json(req, v)
         }
         (Method::Get, "/api/complete") => {
             let list = shared.hub.lock().unwrap().complete(&arg("text").unwrap_or_default());
@@ -365,15 +386,18 @@ fn feed(shared: &Shared, channel: &str, v: Option<&str>) -> Value {
             let (html, tool, clamp) = match &p.body {
                 Body::Markdown { text, clamp } => {
                     let key = format!("{}:{}", theme::t().name, p.key); // code colors follow the theme
-                    let html = cache.entry(key).or_insert_with(|| render::markdown(text)).clone();
+                    let cwd = p.cwd.unwrap_or("");
+                    let is_file = |c: &str| files::resolve(cwd, c).is_some();
+                    let html = cache.entry(key).or_insert_with(|| render::markdown(text, &is_file)).clone();
                     let clamp = match clamp.hint() {
                         None => Value::Null,
                         Some(hint) => json!({ "to_dm": *clamp == Clamp::ToDm, "hint": hint }),
                     };
                     (Some(html), Value::Null, clamp)
                 }
-                Body::Tool { name, detail, full, error } => {
-                    let tool = json!({ "name": name, "detail": detail, "error": error, "expandable": !full.is_empty() });
+                Body::Tool { name, detail, full, path, error } => {
+                    let file = path.filter(|f| files::resolve(p.cwd.unwrap_or(""), f).is_some());
+                    let tool = json!({ "name": name, "detail": detail, "error": error, "expandable": !full.is_empty(), "file": file });
                     (None, tool, Value::Null)
                 }
             };

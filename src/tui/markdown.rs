@@ -7,10 +7,17 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
-pub fn render(text: &str, width: usize) -> Vec<Line<'static>> {
+/// Renders markdown; inline code that `is_file` accepts is drawn as a file link.
+pub fn render(text: &str, width: usize, is_file: &dyn Fn(&str) -> bool) -> Vec<Line<'static>> {
     let mut r = Renderer { width: width.max(16), ..Renderer::default() };
     for ev in highlight::markdown(text) {
-        r.event(ev);
+        match ev {
+            Event::Code(t) if is_file(&t) => {
+                let link = Style::new().fg(theme::t().link).add_modifier(Modifier::UNDERLINED);
+                r.push(&t, link);
+            }
+            ev => r.event(ev),
+        }
     }
     r.flush();
     while r.out.last().is_some_and(|l| l.width() == 0) {
@@ -395,7 +402,7 @@ mod tests {
     use super::render;
 
     fn plain(text: &str, width: usize) -> Vec<String> {
-        render(text, width).iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect()).collect()
+        render(text, width, &|_| false).iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect()).collect()
     }
 
     #[test]

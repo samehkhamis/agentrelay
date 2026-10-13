@@ -100,6 +100,7 @@ async function refreshState() {
 
 function select(id) {
   document.body.classList.remove("drawer");
+  if (id !== current) closeFile();
   if (id === current) return;
   current = id;
   localStorage.setItem("agentchat.channel", id);
@@ -218,24 +219,31 @@ function renderPost(p) {
   if (p.tool) {
     const t = el("div", `tool${p.tool.error ? " error" : ""}${p.tool.expandable ? " expandable" : ""}`);
     const mark = el("span", "mark", p.tool.error ? "✗" : p.tool.expandable ? "▸" : "·");
-    t.append(mark, el("span", "tool-name", p.tool.name), el("span", "tool-detail", p.tool.detail));
+    const detail = el("span", `tool-detail${p.tool.file ? " file-link" : ""}`, p.tool.detail);
+    if (p.tool.file) {
+      detail.onclick = (e) => {
+        e.stopPropagation(); // open the file rather than expand the call
+        openFile(p.tool.file);
+      };
+    }
+    t.append(mark, el("span", "tool-name", p.tool.name), detail);
     t.title = p.tool.detail;
     post.append(t);
     if (p.tool.expandable) {
-      const detail = el("div", "tool-full body");
+      const full = el("div", "tool-full body");
       const show = async (open) => {
-        if (open && !detail.innerHTML) {
+        if (open && !full.innerHTML) {
           const r = await api(`/api/tool?${new URLSearchParams({ channel: current, key: p.key })}`);
-          detail.innerHTML = r.html || ""; // rendered and sanitized by the server
+          full.innerHTML = r.html || ""; // rendered and sanitized by the server
         }
-        detail.hidden = !open;
+        full.hidden = !open;
         if (!p.tool.error) mark.textContent = open ? "▾" : "▸";
         open ? expanded.add(p.key) : expanded.delete(p.key);
       };
-      detail.hidden = true;
-      t.onclick = () => show(detail.hidden);
+      full.hidden = true;
+      t.onclick = () => show(full.hidden);
       if (expanded.has(p.key)) show(true); // stays open across feed refreshes
-      post.append(detail);
+      post.append(full);
     }
   } else {
     const body = el("div", `body${p.clamp ? " clamp" : ""}`);
@@ -469,6 +477,46 @@ $("new-form").onsubmit = async (e) => {
   const r = await api("/api/new", { channel: current, kind, folder: $("new-folder").value, prompt: $("new-prompt").value });
   toast(r.note);
 };
+
+// ---------------------------------------------------------------- file panel
+
+let viewing = null; // full path of the open file
+
+async function openFile(raw) {
+  const r = await api(`/api/file?${new URLSearchParams({ channel: current, file: raw })}`);
+  if (r.error) return toast(r.error);
+  viewing = r.full;
+  $("viewer-path").textContent = r.path;
+  $("viewer-path").title = r.full;
+  $("viewer-body").innerHTML = r.html; // rendered and escaped by the server
+  $("viewer").hidden = false;
+  document.body.classList.add("viewing");
+  const target = r.line && $("viewer-body").querySelector(`#L${r.line}`);
+  if (target) target.scrollIntoView({ block: "center" });
+  else $("viewer-body").scrollTop = 0;
+}
+
+function closeFile() {
+  viewing = null;
+  $("viewer").hidden = true;
+  document.body.classList.remove("viewing");
+}
+
+$("feed").addEventListener("click", (e) => {
+  const link = e.target.closest("a.file");
+  if (link) {
+    e.preventDefault();
+    openFile(link.dataset.file);
+  }
+});
+$("viewer-close").onclick = closeFile;
+$("viewer-copy").onclick = async () => {
+  await navigator.clipboard?.writeText(viewing ?? "");
+  toast("path copied");
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && viewing && !suggestions.length && !$("new-agent").open) closeFile();
+});
 
 // ---------------------------------------------------------------- drawer (phones)
 

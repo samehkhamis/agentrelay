@@ -36,8 +36,9 @@ impl Clamp {
 
 pub enum Body<'a> {
     Markdown { text: &'a str, clamp: Clamp },
-    /// A tool call: one line, expandable to its `full` input (markdown).
-    Tool { name: &'a str, detail: &'a str, full: &'a str, error: bool },
+    /// A tool call: one line, expandable to its `full` input (markdown), and
+    /// the file it worked on.
+    Tool { name: &'a str, detail: &'a str, full: &'a str, path: Option<&'a str>, error: bool },
 }
 
 pub struct Post<'a> {
@@ -55,6 +56,8 @@ pub struct Post<'a> {
     pub body: Body<'a>,
     /// Attached files and images (paths).
     pub files: Vec<&'a str>,
+    /// The agent's folder, against which the post's file mentions resolve.
+    pub cwd: Option<&'a str>,
     /// First post of its day: draw a day divider above it.
     pub new_day: bool,
     /// Starts an author group: draw the author header above it.
@@ -116,8 +119,9 @@ fn entry_post<'a>(e: &'a Entry, author: &'a str, kind: &'a str, me: &'a str, sub
             let clamp = if sub { Clamp::Expand } else { Clamp::Off };
             post(key, e.ts, author, kind, tag, None, Body::Markdown { text, clamp })
         }
-        Item::Tool { name, detail, full, error, files, .. } => {
-            let mut p = post(key, e.ts, author, kind, tag, None, Body::Tool { name, detail, full, error: *error });
+        Item::Tool { name, detail, full, path, error, files } => {
+            let body = Body::Tool { name, detail, full, path: path.as_deref(), error: *error };
+            let mut p = post(key, e.ts, author, kind, tag, None, body);
             p.files = files.iter().map(String::as_str).collect();
             p
         }
@@ -140,7 +144,7 @@ fn post<'a>(
     note: Option<&'static str>,
     body: Body<'a>,
 ) -> Post<'a> {
-    Post { key, ts, author, author_kind, tag, note, body, files: Vec::new(), new_day: false, new_group: false }
+    Post { key, ts, author, author_kind, tag, note, body, files: Vec::new(), cwd: None, new_day: false, new_group: false }
 }
 
 /// Sets the day and group breaks: a header for each author run, broken by

@@ -13,6 +13,7 @@ pub use commands::{help, parse_input, theme_list, Completion, Input};
 
 use crate::agents::{Agent, Kind, Presence};
 use crate::db::{self, Msg};
+use crate::files::{self, FileRef};
 use crate::{ipc, theme};
 use crate::transcript::Tail;
 use crate::uploads;
@@ -195,10 +196,58 @@ impl Hub {
 
     /// The feed for a channel: the transcript for a followed DM, else the log.
     pub fn posts(&self, chan: &Channel) -> Vec<Post<'_>> {
-        match chan.agent().and_then(|n| self.tails.get_key_value(n)) {
+        let mut posts = match chan.agent().and_then(|n| self.tails.get_key_value(n)) {
             Some((name, tail)) => feed::transcript_posts(tail, name, chan.kind.unwrap_or(Kind::Claude), &self.me),
             None => feed::log_posts(&self.msgs, chan),
+        };
+        // Mentions resolve against the DM agent's folder, or the author's.
+        let cwd_of = |name: &str| self.agents.iter().find(|a| a.name == name).map(|a| a.cwd.as_str());
+        let dm = chan.agent().and_then(cwd_of);
+        for p in &mut posts {
+            p.cwd = dm.or_else(|| cwd_of(p.author));
         }
+        posts
+    }
+
+    /// Files a feed mentions (tool calls and inline code), newest first.
+    pub fn mentioned_files(&self, chan: &Channel) -> Vec<(String, FileRef)> {
+        let mut out: Vec<(String, FileRef)> = Vec::new();
+        for p in self.posts(chan).iter().rev() {
+            let cwd = p.cwd.unwrap_or("");
+            let raws: Vec<String> = match &p.body {
+                feed::Body::Tool { path: Some(path), .. } => vec![path.to_string()],
+                feed::Body::Markdown { text, .. } => crate::highlight::markdown(text)
+                    .filter_map(|e| match e {
+                        pulldown_cmark::Event::Code(c) => Some(c.to_string()),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            for raw in raws {
+                // Images already show inline; the file views are for text.
+                let new = |f: &FileRef| !uploads::is_image(&f.path) && !out.iter().any(|(_, o)| o.path == f.path);
+                if let Some(f) = files::resolve(cwd, &raw).filter(new) {
+                    out.push((raw, f));
+                }
+            }
+        }
+        out
+    }
+
+    /// Opens a file mentioned in a channel for viewing: inside one of its
+    /// agents' folders, or one the feed mentions. Returns it with its line.
+    pub fn open_file(&self, chan: &Channel, raw: &str) -> Result<(FileRef, String)> {
+        let cwds: Vec<&str> = self.posts(chan).iter().filter_map(|p| p.cwd).collect();
+        let file = cwds
+            .iter()
+            .find_map(|cwd| files::resolve(cwd, raw))
+            .ok_or_else(|| anyhow::anyhow!("no such file: {raw}"))?;
+        let inside = |cwd: &&str| file.path.canonicalize().ok().is_some_and(|p| p.starts_with(cwd));
+        let mentioned = || self.mentioned_files(chan).iter().any(|(_, f)| f.path == file.path);
+        anyhow::ensure!(cwds.iter().any(inside) || mentioned(), "{raw} isn't in this agent's folder");
+        let text = files::read_text(&file.path).ok_or_else(|| anyhow::anyhow!("{raw} isn't a text file"))?;
+        Ok((file, text))
     }
 
     /// A tool call's full input (markdown), by post key, for expanding it.

@@ -1,5 +1,6 @@
 mod agents;
 mod db;
+mod files;
 mod highlight;
 mod hub;
 mod ipc;
