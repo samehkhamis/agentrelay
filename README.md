@@ -63,10 +63,6 @@ something different:
   replies, tool calls (expand them for the input and output), images, and
   subagent activity, which is marked with a colored bar.
 - **Markdown and syntax highlighting** in both UIs, from one shared renderer.
-- **Files changed per turn.** At the end of each turn, a marked region lists
-  the files the agent changed with `+`/`−` counts. Click a file to open it, or
-  expand a row to see its diff. It covers edits made through Claude's and
-  Codex's own edit tools, not files changed by shell commands.
 - **Clickable files.** Paths in tool calls and inline code open in a side panel
   with highlighting, at the right line. `/open` fuzzy-finds any file in the
   agent's folder.

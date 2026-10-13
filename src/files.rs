@@ -91,14 +91,6 @@ pub fn lang(path: &Path) -> String {
     path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// A path for display: relative to `cwd` when inside it, else with `~`.
-pub fn display_path(path: &str, cwd: Option<&str>) -> String {
-    match cwd.and_then(|c| Path::new(path).strip_prefix(c).ok()) {
-        Some(rel) if !rel.as_os_str().is_empty() => rel.display().to_string(),
-        _ => db::tilde(path),
-    }
-}
-
 /// A file a markdown file links to by relative path (`docs/a.md#part`),
 /// if it exists. Opening it still goes through the hub's folder check.
 pub fn linked_file(dir: &Path, url: &str) -> Option<PathBuf> {

@@ -249,11 +249,6 @@ function renderPost(p) {
     const body = el("div", `body${p.clamp ? " clamp" : ""}`);
     body.innerHTML = p.html; // rendered and sanitized by the server
     for (const a of body.querySelectorAll("a")) Object.assign(a, { target: "_blank", rel: "noopener noreferrer" });
-    // A changed file's diff stays open across feed refreshes.
-    for (const d of body.querySelectorAll("details[data-key]")) {
-      d.open = expanded.has(d.dataset.key);
-      d.ontoggle = () => (d.open ? expanded.add(d.dataset.key) : expanded.delete(d.dataset.key));
-    }
     post.append(body);
     if (p.clamp) {
       const more = el("span", "more", p.clamp.hint);

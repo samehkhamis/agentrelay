@@ -1,7 +1,7 @@
 //! Claude Code session lines: `user`, `assistant`, `queued_command`
 //! attachments (prompts sent mid-turn) and `ai-title`.
 
-use super::{change, display_name, fenced, first_string, images, one_line, parse_ts, prompt, tool, Call, ChangeOp, Entry, Event, Item, Opts};
+use super::{display_name, fenced, first_string, images, one_line, parse_ts, prompt, tool, Call, Entry, Event, Item, Opts};
 use serde_json::Value;
 
 /// One line; subagent (`isSidechain`) lines only when reading a subagent file.
@@ -47,9 +47,8 @@ pub(super) fn parse(v: &Value, opts: Opts) -> Vec<Event> {
                     }
                 }
                 if !texts.is_empty() || !files.is_empty() {
-                    events.extend(user_text(uuid.clone(), ts, &texts.join("\n"), meta, files));
+                    events.extend(user_text(uuid, ts, &texts.join("\n"), meta, files));
                 }
-                events.extend(edit_result(format!("{uuid}:change"), ts, v.get("toolUseResult")));
                 events
             }
             _ => Vec::new(),
@@ -100,31 +99,6 @@ fn user_text(key: String, ts: i64, text: &str, meta: bool, files: Vec<String>) -
         return None; // local command output, reminders, notifications
     }
     Some(prompt(key, ts, None, text, files))
-}
-
-/// What an Edit or Write changed, from its result: the hunks it applied, or
-/// a new file's content.
-fn edit_result(key: String, ts: i64, result: Option<&Value>) -> Option<Event> {
-    let r = result?.as_object()?;
-    let path = r.get("filePath")?.as_str()?;
-    let hunks = r.get("structuredPatch").and_then(Value::as_array).filter(|h| !h.is_empty());
-    let (op, diff) = match (r.get("type").and_then(Value::as_str), hunks) {
-        (_, Some(hunks)) => (ChangeOp::Updated, hunks.iter().map(hunk).collect::<Vec<_>>().join("\n")),
-        (Some("create"), None) => {
-            let content = r.get("content")?.as_str()?;
-            let lines: Vec<String> = content.lines().map(|l| format!("+{l}")).collect();
-            (ChangeOp::Added, format!("@@ -0,0 +1,{} @@\n{}", lines.len(), lines.join("\n")))
-        }
-        _ => return None,
-    };
-    Some(change(key, ts, path, op, diff))
-}
-
-/// One `structuredPatch` hunk as unified diff text.
-fn hunk(h: &Value) -> String {
-    let n = |k: &str| h.get(k).and_then(Value::as_u64).unwrap_or(0);
-    let lines: Vec<&str> = h.get("lines").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
-    format!("@@ -{},{} +{},{} @@\n{}", n("oldStart"), n("oldLines"), n("newStart"), n("newLines"), lines.join("\n"))
 }
 
 /// An inline `{type: image, source: {type: base64, media_type, data}}` block.
@@ -178,39 +152,4 @@ fn describe(name: &str, input: &Value) -> Call {
 fn edit_diff(old: &str, new: &str) -> String {
     let lines = |text: &str, mark: char| text.lines().map(|l| format!("{mark} {l}")).collect::<Vec<_>>().join("\n");
     fenced("diff", &format!("{}\n{}", lines(old, '-'), lines(new, '+')))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::{ChangeOp, Event, Item};
-    use super::edit_result;
-    use serde_json::json;
-
-    fn change(ev: Option<Event>) -> (String, ChangeOp, usize, usize, String) {
-        match ev {
-            Some(Event::Entry(e, _)) => match e.item {
-                Item::Change(c) => (c.path, c.op, c.added, c.removed, c.diff),
-                _ => panic!("not a change"),
-            },
-            _ => panic!("no entry"),
-        }
-    }
-
-    #[test]
-    fn reads_edits_and_new_files() {
-        let edit = json!({
-            "filePath": "/p/a.rs",
-            "structuredPatch": [{ "oldStart": 3, "oldLines": 2, "newStart": 3, "newLines": 3, "lines": [" x", "-y", "+y2", "+z"] }],
-        });
-        let (path, op, added, removed, diff) = change(edit_result("k".into(), 0, Some(&edit)));
-        assert_eq!((path.as_str(), op, added, removed), ("/p/a.rs", ChangeOp::Updated, 2, 1));
-        assert!(diff.starts_with("@@ -3,2 +3,3 @@\n x\n-y"));
-
-        let new = json!({ "type": "create", "filePath": "/p/b.md", "content": "one\ntwo\n", "structuredPatch": [] });
-        let (_, op, added, removed, _) = change(edit_result("k".into(), 0, Some(&new)));
-        assert_eq!((op, added, removed), (ChangeOp::Added, 2, 0));
-
-        // A failed edit's result is a string.
-        assert!(edit_result("k".into(), 0, Some(&json!("Error: no match"))).is_none());
-    }
 }
