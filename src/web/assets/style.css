@@ -332,3 +332,45 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
   .row { height: 36px; }
   #jump { right: 14px; bottom: 80px; }
 }
+
+/* ---------------------------------------------------------------- shell mode */
+
+#shell-mark {
+  position: absolute;
+  left: 12px;
+  top: 11px;
+  color: var(--code);
+  font: 700 15px/1.46 var(--mono);
+}
+#composer.shell #input {
+  padding-left: 30px;
+  border-color: var(--code);
+  font-family: var(--mono);
+}
+
+/* ---------------------------------------------------------------- new agent dialog */
+
+#new-agent {
+  width: min(460px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--fg);
+}
+#new-agent::backdrop { background: rgba(0, 0, 0, .5); }
+#new-agent h2 { margin: 0 0 14px; font-size: 18px; }
+#new-agent .kinds { display: flex; gap: 18px; margin-bottom: 12px; }
+#new-agent .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; font-size: 13px; font-weight: 700; }
+#new-agent .optional, #new-agent .note { color: var(--muted); font-size: 12px; font-weight: 400; }
+#new-agent select, #new-agent textarea {
+  padding: 8px;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px var(--font);
+}
+#new-agent .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+#new-agent button { padding: 7px 14px; border: 1px solid var(--input-border); border-radius: 6px; background: none; color: var(--fg); font: 600 14px var(--font); cursor: pointer; }
+#new-agent button.primary { border-color: var(--selected-bg); background: var(--selected-bg); color: #fff; }

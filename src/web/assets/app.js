@@ -13,6 +13,7 @@ let awaiting = new Set();
 let sound = localStorage.getItem("agentchat.sound") !== "off";
 let toastTimer = null;
 let pending = []; // uploaded files waiting to be sent: {id, name, image}
+let shell = false; // shell mode: "!" typed into an empty composer
 
 function api(path, body) {
   const init = { headers: { "X-Agentchat": "1", "Content-Type": "application/json" } };
@@ -124,10 +125,8 @@ function renderSidebar() {
         const add = el("button", "add", "＋");
         Object.assign(add, { type: "button", title: "Start an agent: /new claude|codex [folder] <prompt>" });
         add.onclick = () => {
-          $("input").value = "/new claude ";
-          autosize();
-          $("input").focus();
           document.body.classList.remove("drawer");
+          openNewAgent();
         };
         head.append(add);
       }
@@ -152,7 +151,7 @@ function renderHeader() {
   $("title-dot").replaceChildren(...(c.section === "direct" ? [presenceDot(c.presence)] : []));
   $("title").textContent = c.title;
   $("detail").textContent = c.detail;
-  $("input").placeholder = `Message ${c.title}`;
+  setPlaceholder();
   document.title = `${c.title} · agentchat`;
 }
 
@@ -262,9 +261,11 @@ function renderFiles(files) {
 
 async function submit() {
   const input = $("input");
-  const text = input.value.trim();
-  if (!text && !pending.length) return;
+  const typed = input.value.trim();
+  if (!typed && !pending.length) return;
+  const text = shell ? `!${typed}` : typed;
   input.value = "";
+  setShell(false);
   autosize();
   if (text === "/sound") {
     sound = !sound;
@@ -374,6 +375,53 @@ $("file").onchange = () => {
   $("file").value = "";
 };
 
+// ---------------------------------------------------------------- shell mode
+
+function setShell(on) {
+  shell = on;
+  $("composer").classList.toggle("shell", on);
+  $("shell-mark").hidden = !on;
+  setPlaceholder();
+}
+
+function setPlaceholder() {
+  const c = channel(current);
+  if (!c) return;
+  $("input").placeholder = !shell
+    ? `Message ${c.title} · ! for shell`
+    : c.section === "direct"
+      ? `Shell command for ${c.name} · Backspace to leave`
+      : "Shell commands run in a DM · Backspace to leave";
+}
+
+// ---------------------------------------------------------------- new agent
+
+function tilde(path) {
+  return state.home && path.startsWith(state.home) ? `~${path.slice(state.home.length)}` : path;
+}
+
+function openNewAgent() {
+  const c = channel(current);
+  // Default to the open DM's or project's folder.
+  const here = c?.section === "direct" || c?.section === "projects"
+    ? state.folders.find((f) => f.split("/").pop() === (c.section === "projects" ? c.name : c.name.replace(/-[0-9a-f]{2,6}$/, "")))
+    : null;
+  $("new-folder").replaceChildren(...state.folders.map((f) => Object.assign(el("option", "", tilde(f)), { value: f })));
+  if (here) $("new-folder").value = here;
+  $("new-prompt").value = "";
+  $("new-agent").showModal();
+}
+
+$("new-cancel").onclick = () => $("new-agent").close();
+$("new-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const kind = new FormData($("new-form")).get("kind");
+  $("new-agent").close();
+  toast(`starting ${kind}…`);
+  const r = await api("/api/new", { channel: current, kind, folder: $("new-folder").value, prompt: $("new-prompt").value });
+  toast(r.note);
+};
+
 // ---------------------------------------------------------------- drawer (phones)
 
 $("menu").onclick = () => document.body.classList.toggle("drawer");
@@ -390,10 +438,19 @@ $("composer").onsubmit = (e) => {
   submit();
 };
 $("input").addEventListener("keydown", (e) => {
+  const empty = !$("input").value;
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     submit();
-  } else if (e.key === "Backspace" && !$("input").value && pending.length) {
+  } else if (e.key === "!" && empty && !shell) {
+    // Like Claude Code: "!" on an empty line enters shell mode...
+    e.preventDefault();
+    setShell(true);
+  } else if (e.key === "Backspace" && empty && shell) {
+    // ...and Backspace on an empty line leaves it.
+    e.preventDefault();
+    setShell(false);
+  } else if (e.key === "Backspace" && empty && pending.length) {
     pending.pop();
     renderPending();
   }

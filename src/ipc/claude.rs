@@ -38,14 +38,15 @@ pub fn send(pid: u32, text: &str) -> Result<()> {
     Ok(())
 }
 
-/// Starts a background Claude Code session in `cwd` with a first prompt, in
+/// Starts a background Claude Code session in `cwd`, with a first prompt or idle, in
 /// bypass-permissions mode like the user's other sessions (supported
 /// `claude --bg`; there is no socket call for creating a session). Returns
 /// its short id. Claude refuses folders whose trust prompt wasn't accepted,
 /// and says so; that message is the error.
 pub fn start(cwd: &Path, prompt: &str) -> Result<String> {
     let out = Command::new("claude")
-        .args(["--bg", "--permission-mode", "bypassPermissions", prompt])
+        .args(["--bg", "--permission-mode", "bypassPermissions"])
+        .args((!prompt.is_empty()).then_some(prompt))
         .current_dir(cwd)
         .stdin(Stdio::null())
         .output()
@@ -54,8 +55,8 @@ pub fn start(cwd: &Path, prompt: &str) -> Result<String> {
     if !out.status.success() {
         return Err(anyhow!("{}", text.trim()));
     }
-    // "backgrounded · ecb5563e"
-    let id = text.lines().find_map(|l| l.split_once("backgrounded · ").map(|(_, id)| id.trim().to_string()));
+    // "backgrounded · ecb5563e", maybe followed by "(idle — …)"
+    let id = text.lines().find_map(|l| l.split_once("backgrounded · ")?.1.split_whitespace().next().map(str::to_string));
     Ok(id.unwrap_or_default())
 }
 

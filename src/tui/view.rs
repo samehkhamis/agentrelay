@@ -74,8 +74,9 @@ impl App {
             }
             rows.push((self.sidebar_row(c, width), Some(c.id.as_str())));
         }
+        rows.push((Line::styled("  ＋ new agent", Style::new().fg(theme::t().sidebar_fg)), Some(super::NEW_AGENT)));
         rows.push((Line::default(), None));
-        rows.push((Line::styled(" Tab switch · Ctrl+T theme", dim), None));
+        rows.push((Line::styled(" Tab switch · ! shell · Ctrl+T theme", dim), None));
 
         // Keep the selected row on screen.
         let h = area.height as usize;
@@ -191,22 +192,38 @@ impl App {
     // ------------------------------------------------------------ composer
 
     fn draw_composer(&self, f: &mut Frame, area: Rect) {
-        let mut block = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().fg(theme::t().dim));
+        let th = theme::t();
+        let shell = self.editor.shell;
+        let mut block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(Style::new().fg(if shell { th.code } else { th.dim }));
         if !self.pending.is_empty() {
             let names: Vec<String> = self.pending.iter().map(|p| uploads::display_name(p)).collect();
             let title = format!(" 📎 {} ", names.join("  "));
-            block = block.title(Span::styled(title, Style::new().fg(theme::t().link)));
+            block = block.title(Span::styled(title, Style::new().fg(th.link)));
         }
         let inner = block.inner(area);
-        let (shown, cursor) = self.editor.view(inner.width as usize);
-        let para = if self.editor.is_empty() {
-            Paragraph::new(Span::styled(format!("Message {}", self.current().title()), Style::new().fg(theme::t().dim)))
+        f.render_widget(block, area);
+        // Shell mode: a `$` marker before the command, in the shell color.
+        let marker = if shell { 2 } else { 0 };
+        if shell {
+            f.render_widget(Span::styled("$ ", Style::new().fg(th.code).bold()), inner);
+        }
+        let text_area = Rect { x: inner.x + marker, width: inner.width.saturating_sub(marker), ..inner };
+        let (shown, cursor) = self.editor.view(text_area.width as usize);
+        let hint = match (shell, self.current().agent()) {
+            (true, Some(agent)) => format!("Shell command for {agent} · Backspace to leave"),
+            (true, None) => "Shell commands run in a DM · Backspace to leave".into(),
+            (false, _) => format!("Message {} · ! for shell", self.current().title()),
+        };
+        let para = if shown.is_empty() {
+            Paragraph::new(Span::styled(hint, Style::new().fg(th.dim)))
         } else {
             Paragraph::new(shown)
         };
-        f.render_widget(para.block(block), area);
-        let x = (inner.x + cursor as u16).min(inner.right().saturating_sub(1));
-        f.set_cursor_position(Position::new(x, inner.y));
+        f.render_widget(para, text_area);
+        let x = (text_area.x + cursor as u16).min(text_area.right().saturating_sub(1));
+        f.set_cursor_position(Position::new(x, text_area.y));
     }
 }
 

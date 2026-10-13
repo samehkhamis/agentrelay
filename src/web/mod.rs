@@ -188,6 +188,16 @@ fn handle(mut req: Request, shared: &Shared) {
             shared.hub.lock().unwrap().mark_seen(&arg("channel").unwrap_or_default());
             respond_json(req, json!({ "ok": true }))
         }
+        (Method::Post, "/api/new") => {
+            let kind = crate::agents::Kind::parse(&arg("kind").unwrap_or_default());
+            let task = shared.hub.lock().unwrap().start_agent(
+                &arg("channel").unwrap_or_default(),
+                kind,
+                arg("folder").as_deref(),
+                &arg("prompt").unwrap_or_default(),
+            );
+            respond_json(req, json!({ "note": task.map_or_else(|e| e.to_string(), hub::Task::run) }))
+        }
         (Method::Post, "/api/theme") => {
             let v = set_theme(shared, &arg("name").unwrap_or_default());
             respond_json(req, v)
@@ -272,6 +282,8 @@ fn state(shared: &Shared) -> Value {
         "help": hub::HELP,
         "theme": theme::t().name,
         "themes": theme::names(),
+        "folders": hub.folders(),
+        "home": db::home(),
     })
 }
 

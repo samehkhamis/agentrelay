@@ -8,16 +8,28 @@ pub struct Editor {
     text: String,
     /// Cursor position in chars.
     cursor: usize,
+    /// Shell mode: `!` typed into an empty line; the text is a command.
+    pub shell: bool,
 }
 
 impl Editor {
+    /// Nothing typed and not in shell mode.
     pub fn is_empty(&self) -> bool {
-        self.text.is_empty()
+        self.text.is_empty() && !self.shell
     }
 
+    /// The entered line, `!`-prefixed in shell mode, leaving shell mode.
     pub fn take(&mut self) -> String {
         self.cursor = 0;
-        std::mem::take(&mut self.text)
+        let text = std::mem::take(&mut self.text);
+        if std::mem::take(&mut self.shell) { format!("!{text}") } else { text }
+    }
+
+    /// Replaces the line, e.g. to prefill a command.
+    pub fn set(&mut self, text: &str) {
+        self.text = text.to_string();
+        self.cursor = text.chars().count();
+        self.shell = false;
     }
 
     /// Inserts text at the cursor.
@@ -40,6 +52,10 @@ impl Editor {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
         match k.code {
+            // Like Claude Code: `!` on an empty line enters shell mode and
+            // Backspace on an empty line leaves it.
+            KeyCode::Char('!') if self.text.is_empty() && !self.shell => self.shell = true,
+            KeyCode::Backspace if self.text.is_empty() && self.shell => self.shell = false,
             KeyCode::Char('a') if ctrl => self.cursor = 0,
             KeyCode::Char('e') if ctrl => self.cursor = self.len(),
             KeyCode::Char('u') if ctrl => {

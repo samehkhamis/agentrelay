@@ -30,6 +30,7 @@
     <form id="composer">
       <div id="attachments"></div>
       <div class="input-row">
+        <span id="shell-mark" hidden>$</span>
         <textarea id="input" rows="1" autocomplete="off"></textarea>
         <button id="attach" type="button" aria-label="Attach files" title="Attach files">📎</button>
         <input id="file" type="file" multiple hidden>
@@ -37,6 +38,23 @@
       <div class="composer-hint">Enter to send · Shift+Enter for a new line · drop or paste files to attach</div>
     </form>
     <div id="drop" hidden><div>Drop files to attach</div></div>
+    <dialog id="new-agent">
+      <form method="dialog" id="new-form">
+        <h2>New agent</h2>
+        <div class="kinds">
+          <label><input type="radio" name="kind" value="claude" checked> Claude</label>
+          <label><input type="radio" name="kind" value="codex"> Codex</label>
+        </div>
+        <label class="field">Folder<select id="new-folder" required></select></label>
+        <label class="field">First message <span class="optional">optional; leave empty to start it idle</span>
+          <textarea id="new-prompt" rows="3"></textarea></label>
+        <p class="note">Starts in bypass mode, like your other sessions.</p>
+        <div class="actions">
+          <button type="button" id="new-cancel">Cancel</button>
+          <button type="submit" id="new-start" class="primary">Start</button>
+        </div>
+      </form>
+    </dialog>
   </main>
   <script src="/app.js"></script>
 </body>

@@ -312,6 +312,22 @@ impl Hub {
         Ok((!targets.is_empty()).then_some(Delivery { targets, text, images }))
     }
 
+    /// Folders to offer for new agents: the agents' own, plus the projects
+    /// Claude has been trusted in (read from its config, never written).
+    pub fn folders(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.agents.iter().map(|a| a.cwd.clone()).collect();
+        let config = std::fs::read_to_string(db::home().join(".claude.json")).unwrap_or_default();
+        let config: serde_json::Value = serde_json::from_str(&config).unwrap_or_default();
+        if let Some(projects) = config.get("projects").and_then(serde_json::Value::as_object) {
+            let trusted = projects.iter().filter(|(_, p)| p.get("hasTrustDialogAccepted") == Some(&true.into()));
+            out.extend(trusted.map(|(path, _)| path.clone()));
+        }
+        out.retain(|f| !f.is_empty() && std::path::Path::new(f).is_dir());
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// The folder for a new agent: the given one, else the DM agent's or the
     /// project channel's folder.
     fn folder(&self, chan: &Channel, given: Option<&str>) -> Result<PathBuf> {
@@ -330,19 +346,20 @@ impl Hub {
     }
 
     /// Starts a Claude (background session) or Codex (app-server thread)
-    /// agent with a first prompt. Its DM appears once discovery finds it.
+    /// agent, with a first prompt or idle. Its DM appears once discovery finds it.
     pub fn start_agent(&self, chan_id: &str, kind: Kind, folder: Option<&str>, prompt: &str) -> Result<Task> {
         let chan = self.channel(chan_id).ok_or_else(|| anyhow::anyhow!("no channel"))?;
-        anyhow::ensure!(!prompt.trim().is_empty(), "give it a first prompt: /new {} <prompt>", kind.as_str());
         let cwd = self.folder(chan, folder)?;
-        let prompt = prompt.to_string();
+        let prompt = prompt.trim().to_string();
         Ok(Task(Box::new(move || {
             let shown = cwd.display().to_string().replace(&db::home().display().to_string(), "~");
             let started = match kind {
                 Kind::Claude => ipc::claude::start(&cwd, &prompt).map(|id| format!("claude {id}")),
                 Kind::Codex => ipc::codex::AppServer::connect().and_then(|mut s| {
                     let thread = s.start_thread(&cwd)?;
-                    s.start_turn(&thread, &prompt, &[])?;
+                    if !prompt.is_empty() {
+                        s.start_turn(&thread, &prompt, &[])?;
+                    }
                     Ok("codex".to_string())
                 }),
             };

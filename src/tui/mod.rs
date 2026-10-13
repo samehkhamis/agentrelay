@@ -28,6 +28,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 const POLL: Duration = Duration::from_millis(400);
+/// The sidebar's "＋ new agent" row, clickable like a channel.
+const NEW_AGENT: &str = "+new";
 
 /// What background work reports back.
 enum Done {
@@ -168,6 +170,11 @@ impl App {
     }
 
     fn select(&mut self, id: &str) {
+        if id == NEW_AGENT {
+            self.editor.set("/new claude ");
+            self.notify("/new claude|codex [folder] [prompt] · Enter to start");
+            return;
+        }
         if id != self.selected {
             self.selected = id.to_string();
             self.scroll = 0;
