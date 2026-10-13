@@ -13,6 +13,10 @@ pub struct Editor {
 }
 
 impl Editor {
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
     /// Nothing typed and not in shell mode.
     pub fn is_empty(&self) -> bool {
         self.text.is_empty() && !self.shell

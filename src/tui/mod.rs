@@ -44,6 +44,9 @@ pub struct App {
     /// Id of the open channel.
     selected: String,
     editor: Editor,
+    /// Highlighted autocomplete suggestion, and the line Esc dismissed them for.
+    suggestion: usize,
+    dismissed: Option<String>,
     /// Files to attach to the next message.
     pending: Vec<PathBuf>,
     /// Lines scrolled up from the bottom of the feed.
@@ -85,6 +88,8 @@ impl App {
             hub: Hub::open()?,
             selected: "all".into(),
             editor: Editor::default(),
+            suggestion: 0,
+            dismissed: None,
             pending: Vec::new(),
             scroll: 0,
             feed_height: 10,
@@ -268,7 +273,53 @@ impl App {
         }
     }
 
+    /// Autocomplete suggestions for the composer line, unless dismissed.
+    fn suggestions(&self) -> Vec<hub::Completion> {
+        let text = self.editor.text();
+        if self.editor.shell || self.dismissed.as_deref() == Some(text) {
+            return Vec::new();
+        }
+        self.hub.complete(text)
+    }
+
+    /// Keys for an open suggestion list. False if the key isn't one of them.
+    fn on_suggestion_key(&mut self, k: KeyEvent) -> Result<bool> {
+        let list = self.suggestions();
+        if list.is_empty() {
+            return Ok(false);
+        }
+        let n = list.len();
+        match k.code {
+            KeyCode::Up => self.suggestion = (self.suggestion + n - 1) % n,
+            KeyCode::Down => self.suggestion = (self.suggestion + 1) % n,
+            KeyCode::Esc => self.dismissed = Some(self.editor.text().to_string()),
+            KeyCode::Tab | KeyCode::Enter => {
+                let pick = &list[self.suggestion.min(n - 1)];
+                self.editor.set(&pick.line);
+                self.suggestion = 0;
+                if pick.run && k.code == KeyCode::Enter {
+                    self.submit()?;
+                }
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
     fn on_key(&mut self, k: KeyEvent) -> Result<()> {
+        if self.on_suggestion_key(k)? {
+            return Ok(());
+        }
+        let before = self.editor.text().to_string();
+        self.handle_key(k)?;
+        if self.editor.text() != before {
+            self.suggestion = 0;
+            self.dismissed = None;
+        }
+        Ok(())
+    }
+
+    fn handle_key(&mut self, k: KeyEvent) -> Result<()> {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let alt = k.modifiers.contains(KeyModifiers::ALT);
         let page = self.feed_height.saturating_sub(2).max(1);

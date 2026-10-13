@@ -180,6 +180,10 @@ fn handle(mut req: Request, shared: &Shared) {
         },
         (Method::Get, "/api/ping") => respond_json(req, json!({ "ok": true })),
         (Method::Get, "/api/state") => respond_json(req, state(shared)),
+        (Method::Get, "/api/complete") => {
+            let list = shared.hub.lock().unwrap().complete(&arg("text").unwrap_or_default());
+            respond_json(req, json!(list))
+        }
         (Method::Get, "/api/feed") => {
             let v = feed(shared, &arg("channel").unwrap_or_default(), arg("v").as_deref());
             respond_json(req, v)

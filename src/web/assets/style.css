@@ -374,3 +374,27 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
 #new-agent .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 #new-agent button { padding: 7px 14px; border: 1px solid var(--input-border); border-radius: 6px; background: none; color: var(--fg); font: 600 14px var(--font); cursor: pointer; }
 #new-agent button.primary { border-color: var(--selected-bg); background: var(--selected-bg); color: #fff; }
+
+/* ---------------------------------------------------------------- autocomplete */
+
+#composer { position: relative; }
+#suggest {
+  position: absolute;
+  bottom: calc(100% - 4px);
+  left: 20px;
+  right: 20px;
+  z-index: 20;
+  max-width: 640px;
+  padding: 4px 0;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .3);
+}
+#suggest[hidden] { display: none; }
+#suggest .item { display: flex; justify-content: space-between; gap: 16px; padding: 6px 12px; cursor: pointer; }
+#suggest .item .label { font: 600 14px var(--mono); }
+#suggest .item .detail { overflow: hidden; color: var(--muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+#suggest .item.on { background: var(--selected-bg); color: #fff; }
+#suggest .item.on .detail { color: rgba(255, 255, 255, .8); }

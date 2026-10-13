@@ -23,7 +23,76 @@ const HISTORY: i64 = 3000;
 const STATUS_ASK: &str = "Quick status update please: what are you working on, what's done, \
                           and is anything blocked? 2-3 lines.";
 pub const HELP: &str =
-    "commands: /status  /new claude|codex [folder] <prompt>  !command (in a DM)  /theme [name]  /sound  /quit";
+    "commands: /status  /new claude|codex [folder] [prompt]  !command (in a DM)  /theme [name]  /sound  /quit";
+
+/// Slash commands: (name, usage after the name, what it does).
+const COMMANDS: [(&str, &str, &str); 5] = [
+    ("/status", "", "ask everyone here for a status update"),
+    ("/new", "claude|codex [folder] [prompt]", "start an agent"),
+    ("/theme", "[name]", "switch the theme for every UI"),
+    ("/sound", "", "turn the reply chime on or off"),
+    ("/quit", "", "leave agentchat"),
+];
+
+/// One autocomplete suggestion.
+#[derive(serde::Serialize)]
+pub struct Completion {
+    /// The whole line once accepted.
+    pub line: String,
+    pub label: String,
+    pub detail: String,
+    /// Accepting it is a complete command: run it rather than keep typing.
+    pub run: bool,
+}
+
+/// Suggestions for a composer line starting with `/`: commands, then their
+/// arguments (agent kinds, theme names, folders).
+pub fn completions(line: &str, folders: &[String]) -> Vec<Completion> {
+    let item = |line: String, label: &str, detail: &str, run: bool| Completion {
+        line,
+        label: label.to_string(),
+        detail: detail.to_string(),
+        run,
+    };
+    let Some(rest) = line.strip_prefix('/') else { return Vec::new() };
+    let Some((cmd, arg)) = rest.split_once(' ') else {
+        return COMMANDS
+            .iter()
+            .filter(|(name, ..)| name[1..].starts_with(rest))
+            .map(|(name, usage, what)| {
+                let label = if usage.is_empty() { name.to_string() } else { format!("{name} {usage}") };
+                let line = if usage.is_empty() { name.to_string() } else { format!("{name} ") };
+                item(line, &label, what, usage.is_empty())
+            })
+            .collect();
+    };
+    match cmd {
+        "theme" => theme::names()
+            .into_iter()
+            .filter(|n| n.starts_with(arg.trim()) && *n != arg.trim())
+            .map(|n| item(format!("/theme {n}"), n, if n == theme::t().name { "current" } else { "" }, true))
+            .collect(),
+        "new" => match arg.split_once(' ') {
+            None => ["claude", "codex"]
+                .into_iter()
+                .filter(|k| k.starts_with(arg) && *k != arg)
+                .map(|k| item(format!("/new {k} "), k, "then a folder and a first message, both optional", false))
+                .collect(),
+            Some((kind, folder)) if folder.starts_with(['~', '/', '.']) && !folder.contains(' ') => {
+                let home = db::home().display().to_string();
+                folders
+                    .iter()
+                    .map(|f| f.replacen(&home, "~", 1))
+                    .filter(|f| f.starts_with(folder) && f != folder)
+                    .take(12)
+                    .map(|f| item(format!("/new {kind} {f} "), &f, "", false))
+                    .collect()
+            }
+            Some(_) => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
 
 /// What the user typed in a composer.
 pub enum Input {
@@ -312,6 +381,12 @@ impl Hub {
         Ok((!targets.is_empty()).then_some(Delivery { targets, text, images }))
     }
 
+    /// Autocomplete for a composer line (folders are only read for `/new`).
+    pub fn complete(&self, line: &str) -> Vec<Completion> {
+        let folders = if line.starts_with("/new ") { self.folders() } else { Vec::new() };
+        completions(line, &folders)
+    }
+
     /// Folders to offer for new agents: the agents' own, plus the projects
     /// Claude has been trusted in (read from its config, never written).
     pub fn folders(&self) -> Vec<String> {
@@ -437,6 +512,16 @@ fn run_shell(command: &str, cwd: &str) -> (String, Option<i32>) {
 mod tests {
     use super::{parse_input, Input};
     use crate::agents::Kind;
+
+    #[test]
+    fn completes_commands_and_arguments() {
+        use super::completions;
+        let labels = |line: &str| completions(line, &["/home/x/code/infra".into()]).into_iter().map(|c| c.line).collect::<Vec<_>>();
+        assert_eq!(labels("/s"), ["/status", "/sound"]);
+        assert_eq!(labels("/new c"), ["/new claude ", "/new codex "]);
+        assert_eq!(labels("/theme dra"), ["/theme dracula"]);
+        assert!(labels("hello").is_empty());
+    }
 
     #[test]
     fn parses_new_and_shell() {

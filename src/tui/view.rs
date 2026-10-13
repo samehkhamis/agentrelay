@@ -7,7 +7,7 @@ use crate::{theme, uploads};
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
@@ -36,6 +36,7 @@ impl App {
         self.draw_header(f, header);
         self.draw_feed(f, body);
         self.draw_composer(f, composer);
+        self.draw_suggestions(f, composer);
         // Reading the bottom of a channel marks it read, in every UI.
         if self.scroll == 0 {
             let id = self.selected.clone();
@@ -224,6 +225,44 @@ impl App {
         f.render_widget(para, text_area);
         let x = (text_area.x + cursor as u16).min(text_area.right().saturating_sub(1));
         f.set_cursor_position(Position::new(x, text_area.y));
+    }
+}
+
+impl App {
+    /// The autocomplete list, just above the composer.
+    fn draw_suggestions(&self, f: &mut Frame, composer: Rect) {
+        let list = self.suggestions();
+        if list.is_empty() {
+            return;
+        }
+        let th = theme::t();
+        let shown = list.len().min(8);
+        let first = self.suggestion.saturating_sub(shown - 1);
+        let width = composer.width.min(80);
+        let height = shown as u16 + 2;
+        let area = Rect::new(composer.x, composer.y.saturating_sub(height), width, height);
+        let rows: Vec<Line> = list
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(shown)
+            .map(|(i, c)| {
+                let base = if i == self.suggestion { Style::new().bg(th.selected_bg).fg(Color::White) } else { Style::new() };
+                let pad = (width as usize).saturating_sub(c.label.width() + c.detail.width() + 4);
+                Line::from(vec![
+                    Span::styled(format!(" {}", c.label), base.bold()),
+                    Span::styled(" ".repeat(pad), base),
+                    Span::styled(format!("{} ", c.detail), base.fg(if i == self.suggestion { Color::White } else { th.dim })),
+                ])
+            })
+            .collect();
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(Style::new().fg(th.dim))
+            .title(Span::styled(" ↑↓ choose · Tab/Enter accept · Esc ", Style::new().fg(th.dim)))
+            .style(Style::new().bg(th.bg).fg(th.fg));
+        f.render_widget(Clear, area);
+        f.render_widget(Paragraph::new(rows).block(block), area);
     }
 }
 

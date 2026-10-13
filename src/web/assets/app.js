@@ -14,6 +14,8 @@ let sound = localStorage.getItem("agentchat.sound") !== "off";
 let toastTimer = null;
 let pending = []; // uploaded files waiting to be sent: {id, name, image}
 let shell = false; // shell mode: "!" typed into an empty composer
+let suggestions = []; // slash-command completions from the server
+let suggestion = 0;
 
 function api(path, body) {
   const init = { headers: { "X-Agentchat": "1", "Content-Type": "application/json" } };
@@ -375,6 +377,43 @@ $("file").onchange = () => {
   $("file").value = "";
 };
 
+// ---------------------------------------------------------------- autocomplete
+
+async function complete() {
+  const text = $("input").value;
+  if (shell || !text.startsWith("/")) {
+    suggestions = [];
+  } else {
+    const list = await api(`/api/complete?${new URLSearchParams({ text })}`);
+    if ($("input").value !== text) return; // typed on meanwhile
+    suggestions = list;
+  }
+  suggestion = 0;
+  renderSuggestions();
+}
+
+function accept(item, run) {
+  $("input").value = item.line;
+  autosize();
+  suggestions = [];
+  renderSuggestions();
+  if (item.run && run) submit();
+  else complete();
+}
+
+function renderSuggestions() {
+  $("suggest").hidden = !suggestions.length;
+  $("suggest").replaceChildren(...suggestions.map((c, i) => {
+    const row = el("div", `item${i === suggestion ? " on" : ""}`);
+    row.append(el("span", "label", c.label), el("span", "detail", c.detail));
+    row.onmousedown = (e) => {
+      e.preventDefault(); // keep focus in the composer
+      accept(c, true);
+    };
+    return row;
+  }));
+}
+
 // ---------------------------------------------------------------- shell mode
 
 function setShell(on) {
@@ -439,6 +478,16 @@ $("composer").onsubmit = (e) => {
 };
 $("input").addEventListener("keydown", (e) => {
   const empty = !$("input").value;
+  if (suggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(e.key) && !e.shiftKey) {
+    e.preventDefault();
+    const n = suggestions.length;
+    if (e.key === "ArrowUp") suggestion = (suggestion + n - 1) % n;
+    else if (e.key === "ArrowDown") suggestion = (suggestion + 1) % n;
+    else if (e.key === "Escape") suggestions = [];
+    else accept(suggestions[suggestion], e.key === "Enter");
+    renderSuggestions();
+    return;
+  }
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     submit();
@@ -455,7 +504,10 @@ $("input").addEventListener("keydown", (e) => {
     renderPending();
   }
 });
-$("input").addEventListener("input", autosize);
+$("input").addEventListener("input", () => {
+  autosize();
+  complete();
+});
 $("feed").addEventListener("scroll", () => ($("jump").hidden = atBottom()));
 $("jump").onclick = () => {
   const f = $("feed");
