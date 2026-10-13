@@ -124,6 +124,15 @@ impl Hub {
         Ok(())
     }
 
+    /// A saved preference, e.g. a UI's panel width.
+    pub fn setting(&self, key: &str) -> Option<String> {
+        db::setting(&self.conn, key).ok().flatten()
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) {
+        let _ = db::set_setting(&self.conn, key, value); // a lost preference isn't worth failing over
+    }
+
     /// Switches every UI to a theme. False if there's no such theme.
     pub fn set_theme(&mut self, name: &str) -> Result<bool> {
         if !theme::set(name) {

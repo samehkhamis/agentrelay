@@ -12,7 +12,6 @@ use ratatui::Frame;
 use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
 
-const SIDEBAR_WIDTH: u16 = 30;
 const TOAST_FOR: Duration = Duration::from_secs(4);
 
 fn presence_dot(p: Option<Presence>) -> Span<'static> {
@@ -25,14 +24,15 @@ fn presence_dot(p: Option<Presence>) -> Span<'static> {
 
 impl App {
     pub(super) fn draw(&mut self, f: &mut Frame) {
-        let [side, main] = Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(20)]).areas(f.area());
+        let [side, main] = Layout::horizontal([Constraint::Length(self.widths.sidebar), Constraint::Min(20)]).areas(f.area());
         let [header, body, composer] =
             Layout::vertical([Constraint::Length(3), Constraint::Min(1), Constraint::Length(3)]).areas(main);
         self.sidebar_area = side;
         // An open file takes the right part of the feed.
         let (body, pane) = match self.viewer {
             Some(_) => {
-                let [left, right] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(body);
+                let pane = self.widths.pane.unwrap_or(body.width * 45 / 100);
+                let [left, right] = Layout::horizontal([Constraint::Min(20), Constraint::Length(pane)]).areas(body);
                 (left, Some(right))
             }
             None => (body, None),
@@ -43,6 +43,7 @@ impl App {
         self.draw_sidebar(f, side);
         self.draw_header(f, header);
         self.draw_feed(f, body);
+        self.viewer_area = Rect::default();
         if let (Some(v), Some(pane)) = (self.viewer.as_mut(), pane) {
             v.draw(f, pane);
             self.viewer_area = pane;

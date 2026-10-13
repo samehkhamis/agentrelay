@@ -32,6 +32,28 @@ const POLL: Duration = Duration::from_millis(400);
 /// The sidebar's "＋ new agent" row, clickable like a channel.
 const NEW_AGENT: &str = "+new";
 
+/// Panel widths in cells, resizable and saved across runs.
+struct Widths {
+    sidebar: u16,
+    /// The file pane; None for 45% of the feed.
+    pane: Option<u16>,
+}
+
+impl Default for Widths {
+    fn default() -> Self {
+        Widths { sidebar: 30, pane: None }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Border {
+    Sidebar,
+    Pane,
+}
+
+const SIDEBAR_MIN: u16 = 18;
+const PANE_MIN: u16 = 24;
+
 /// What background work reports back.
 enum Done {
     /// A send's report.
@@ -64,6 +86,9 @@ pub struct App {
     viewer: Option<viewer::Viewer>,
     viewer_area: Rect,
     picker: Option<(Vec<String>, usize)>,
+    widths: Widths,
+    /// The border being dragged with the mouse.
+    dragging: Option<Border>,
     /// Keyboard selection: the selected post's key, the feed's posts in
     /// order, and its tool calls by key.
     cursor: Option<String>,
@@ -101,8 +126,13 @@ pub fn run() -> Result<()> {
 impl App {
     fn new() -> Result<App> {
         let (done_tx, done_rx) = mpsc::channel();
+        let hub = Hub::open()?;
+        let widths = Widths {
+            sidebar: hub.setting("tui.sidebar").and_then(|w| w.parse().ok()).unwrap_or(30),
+            pane: hub.setting("tui.pane").and_then(|w| w.parse().ok()),
+        };
         Ok(App {
-            hub: Hub::open()?,
+            hub,
             selected: "all".into(),
             editor: Editor::default(),
             suggestion: 0,
@@ -119,6 +149,8 @@ impl App {
             viewer: None,
             viewer_area: Rect::default(),
             picker: None,
+            widths,
+            dragging: None,
             cursor: None,
             cursor_placed: None,
             feed_items: Vec::new(),
@@ -424,8 +456,36 @@ impl App {
         }
     }
 
+    /// Sets a panel's width (clamped so the feed keeps room) and saves it.
+    fn resize(&mut self, border: Border, width: u16) {
+        let total = self.sidebar_area.width + self.feed_area.width + self.viewer_area.width;
+        match border {
+            Border::Sidebar => {
+                self.widths.sidebar = width.clamp(SIDEBAR_MIN, (total / 2).max(SIDEBAR_MIN));
+                self.hub.set_setting("tui.sidebar", &self.widths.sidebar.to_string());
+            }
+            Border::Pane => {
+                let feed_and_pane = self.feed_area.width + self.viewer_area.width;
+                let w = width.clamp(PANE_MIN, feed_and_pane.saturating_sub(30).max(PANE_MIN));
+                self.widths.pane = Some(w);
+                self.hub.set_setting("tui.pane", &w.to_string());
+            }
+        }
+    }
+
     fn on_key(&mut self, k: KeyEvent) -> Result<()> {
         if self.on_picker_key(k) || self.on_suggestion_key(k)? || self.on_cursor_key(k) {
+            return Ok(());
+        }
+        // Alt+←/→ resizes the sidebar, Alt+Shift+←/→ the file pane.
+        if k.modifiers.contains(KeyModifiers::ALT) && matches!(k.code, KeyCode::Left | KeyCode::Right) {
+            let delta: i32 = if k.code == KeyCode::Right { 2 } else { -2 };
+            if k.modifiers.contains(KeyModifiers::SHIFT) && self.viewer.is_some() {
+                // The pane grows leftwards, so → makes it narrower.
+                self.resize(Border::Pane, (i32::from(self.viewer_area.width) - delta).max(0) as u16);
+            } else if !k.modifiers.contains(KeyModifiers::SHIFT) {
+                self.resize(Border::Sidebar, (i32::from(self.widths.sidebar) + delta).max(0) as u16);
+            }
             return Ok(());
         }
         let before = self.editor.text().to_string();
@@ -496,6 +556,36 @@ impl App {
     }
 
     fn on_mouse(&mut self, kind: MouseEventKind, col: u16, row: u16) {
+        // Dragging a border: the sidebar's right edge or the file pane's left one.
+        match kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let on_sidebar_edge = col + 1 == self.sidebar_area.right() || col == self.sidebar_area.right();
+                let on_pane_edge = self.viewer.is_some() && col == self.viewer_area.x;
+                self.dragging = if on_sidebar_edge {
+                    Some(Border::Sidebar)
+                } else if on_pane_edge {
+                    Some(Border::Pane)
+                } else {
+                    None
+                };
+                if self.dragging.is_some() {
+                    return;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.dragging.is_some() => {
+                match self.dragging {
+                    Some(Border::Sidebar) => self.resize(Border::Sidebar, col + 1),
+                    Some(Border::Pane) => {
+                        let right = self.viewer_area.right();
+                        self.resize(Border::Pane, right.saturating_sub(col));
+                    }
+                    None => {}
+                }
+                return;
+            }
+            MouseEventKind::Up(_) if self.dragging.take().is_some() => return,
+            _ => {}
+        }
         let pos = Position::new(col, row);
         let in_feed = self.feed_area.contains(pos);
         let in_viewer = self.viewer.is_some() && self.viewer_area.contains(pos);

@@ -13,7 +13,7 @@
 html, body { height: 100%; margin: 0; }
 body {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: var(--sidebar-w, 260px) minmax(0, 1fr);
   font: 15px/1.46 var(--font);
   background: var(--bg);
   color: var(--fg);
@@ -22,6 +22,7 @@ body {
 /* ---------------------------------------------------------------- sidebar */
 
 #sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -413,8 +414,8 @@ main { position: relative; display: flex; flex-direction: column; min-width: 0; 
 
 /* ---------------------------------------------------------------- file panel */
 
-body.viewing { grid-template-columns: 260px minmax(0, 1fr) minmax(320px, 44%); }
-#viewer { display: flex; flex-direction: column; min-width: 0; height: 100vh; height: 100dvh; border-left: 1px solid var(--rule); }
+body.viewing { grid-template-columns: var(--sidebar-w, 260px) minmax(0, 1fr) var(--viewer-w, minmax(320px, 44%)); }
+#viewer { position: relative; display: flex; flex-direction: column; min-width: 0; height: 100vh; height: 100dvh; border-left: 1px solid var(--rule); }
 #viewer[hidden] { display: none; }
 #viewer header { display: flex; align-items: center; gap: 8px; min-height: 64px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--rule); }
 #viewer-path { flex: 1; overflow: hidden; font: 600 14px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
@@ -434,3 +435,12 @@ a.file code { color: var(--link); text-decoration: underline; text-underline-off
   body.viewing { grid-template-columns: 1fr; }
   #viewer { position: fixed; inset: 0; z-index: 30; background: var(--bg); padding-top: env(safe-area-inset-top); }
 }
+
+/* ---------------------------------------------------------------- resizing */
+
+.resizer { position: absolute; top: 0; bottom: 0; z-index: 5; width: 7px; cursor: col-resize; touch-action: none; }
+#sidebar .resizer { right: -4px; }
+#viewer .resizer { left: -4px; }
+.resizer:hover, .resizer.active { background: color-mix(in srgb, var(--link) 45%, transparent); }
+body.resizing { cursor: col-resize; user-select: none; }
+@media (max-width: 760px) { .resizer { display: none; } }

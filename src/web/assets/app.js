@@ -518,6 +518,53 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && viewing && !suggestions.length && !$("new-agent").open) closeFile();
 });
 
+// ---------------------------------------------------------------- resizing
+
+// Drag the sidebar's right edge or the file panel's left edge; widths are
+// kept per browser. Double-click a handle to reset it.
+const PANELS = {
+  sidebar: { css: "--sidebar-w", min: 180, max: () => innerWidth * 0.45, width: (x) => x },
+  viewer: { css: "--viewer-w", min: 280, max: () => innerWidth - $("sidebar").offsetWidth - 320, width: (x) => innerWidth - x },
+};
+
+function setWidth(name, px) {
+  const p = PANELS[name];
+  if (px == null) {
+    document.documentElement.style.removeProperty(p.css);
+    localStorage.removeItem(`agentchat.${name}`);
+    return;
+  }
+  const w = Math.round(Math.max(p.min, Math.min(px, p.max())));
+  document.documentElement.style.setProperty(p.css, `${w}px`);
+  localStorage.setItem(`agentchat.${name}`, w);
+}
+
+for (const name of Object.keys(PANELS)) {
+  const saved = Number(localStorage.getItem(`agentchat.${name}`));
+  if (saved) setWidth(name, saved);
+}
+
+for (const handle of document.querySelectorAll(".resizer")) {
+  const name = handle.dataset.panel;
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    try {
+      handle.setPointerCapture(e.pointerId); // keep the drag when the pointer outruns the handle
+    } catch {}
+    handle.classList.add("active");
+    document.body.classList.add("resizing");
+    const move = (ev) => setWidth(name, PANELS[name].width(ev.clientX));
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.classList.remove("active");
+      document.body.classList.remove("resizing");
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up, { once: true });
+  });
+  handle.addEventListener("dblclick", () => setWidth(name, null));
+}
+
 // ---------------------------------------------------------------- drawer (phones)
 
 $("menu").onclick = () => document.body.classList.toggle("drawer");
