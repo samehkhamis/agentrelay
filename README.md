@@ -9,42 +9,33 @@ commands for them, from a terminal UI or a web page that stay in sync.
   <img src="docs/screenshots/web-dm.png" alt="The web UI: a DM with a Claude agent, a pasted image, subagent activity and file links" width="720">
 </p>
 
-agentrelay doesn't install hooks, wrap your sessions or touch your settings. It
-finds the agents that are already running and talks to them over their own
-local sockets.
+## How it compares
 
-## Not a harness, not a multiplexer
-
-Most tools for juggling several coding agents take one of two routes:
+Most tools for running several coding agents are one of two kinds:
 
 - **A harness**, like [opencode](https://opencode.ai), is a coding agent of its
-  own: its own loop, tools, prompts and model setup. Moving to one means
-  leaving Claude Code or Codex behind, along with how they behave and what they
-  ship next.
+  own: its own loop, tools, prompts and model setup. Using one means moving
+  off Claude Code or Codex.
 - **A multiplexer**, like [herdr](https://herdr.dev), runs your agents inside
   its own terminal panes. It gives you a workspace, but your agents have to be
   started in it, and it works with them as terminals.
 
-agentrelay does neither. Your agents stay in their own harnesses, in whatever
-terminal, editor or background process you started them from. agentrelay
-connects to them over the same local IPC they already use: Claude Code's peer
-socket, the one sessions use to message each other, and the Codex app-server.
-Then it puts them all in one chat.
+agentrelay is neither. Your agents keep running in Claude Code and Codex, in
+whatever terminal, editor or background process you started them from.
+agentrelay finds them and connects over the local IPC they already have:
+Claude Code's peer socket, which sessions use to message each other, and the
+Codex app-server. It installs no hooks and changes no settings.
 
-What that gets you:
+In practice:
 
-- **Nothing to migrate.** Keep `claude` and `codex` exactly as they are, with
-  your settings, plugins, permissions and updates. Start agents however you
-  like, and they show up.
-- **Real state, not terminal output.** Presence, replies, tool calls and
-  subagent activity come from the agents' own sessions and transcripts.
-- **Messages land as messages.** What you send arrives through the agent's own
-  messaging, the way one session messages another, not as input typed into a
-  terminal.
-- **Safe to close.** agentrelay holds no agent processes. Quit it or restart it,
-  and your agents keep working.
-- **One place for all of them.** Channels per project, per kind, or everyone at
-  once, from a terminal or your phone.
+- You keep using `claude` and `codex` as they are, with your settings, plugins,
+  permissions and updates. Agents you start anywhere show up.
+- Status, replies, tool calls and subagent activity come from the agents'
+  sessions and transcripts, not from their terminal output.
+- Messages go in through each agent's own interface: Claude's
+  session-to-session messaging, or a new turn on the Codex thread.
+- agentrelay doesn't own any agent process. Quitting or restarting it doesn't
+  affect your agents.
 
 ## Features
 
@@ -59,24 +50,23 @@ What that gets you:
 - **Clickable files.** Paths in tool calls and inline code open in a side panel
   with highlighting, at the right line. `/open` fuzzy-finds any file in the
   agent's folder.
-- **Markdown preview.** Markdown files open rendered, with their images (in
-  the TUI too) and links to other files. A Preview / Source switch at the top of the panel
+- **Markdown preview.** Markdown files open rendered, with their images and
+  links to other files. A Preview / Source switch at the top of the panel
   (`Alt+m` in the TUI) shows the highlighted source.
 - **Attachments.** Drag, drop or paste images and files into either UI. The
   agent gets their paths.
 - **Start agents** with `/new claude|codex [folder] [prompt]` or the **+**
   button. Rename the conversation with `/rename`.
 - **Shell mode.** Type `!` to run a command in the agent's folder. Codex runs
-  it in the agent's thread. For Claude, agentrelay runs it and sends the output to
-  the agent.
-- **Presence**: busy, online and away, with unread badges and a chime when an
-  agent replies.
-- **Eight themes**, including terminal favorites. Switching in either UI
-  switches both.
-- **Phone-friendly web UI**: a swipeable drawer for channels and DMs.
+  it in the agent's thread. For Claude, agentrelay runs it and sends the output
+  to the agent.
+- **Status.** Agents show as busy, online or away. Channels show unread counts,
+  and a chime plays when an agent replies.
+- **Themes.** Eight of them. Switching in one UI switches both.
+- **Phone layout.** The web UI's channel list becomes a drawer you can swipe.
 - **Images in the terminal** through
   [ratatui-image](https://github.com/benjajaja/ratatui-image): Kitty, iTerm2 or
-  Sixel, with halfblocks as the fallback.
+  Sixel, falling back to half blocks.
 
 ## Install
 
@@ -88,7 +78,7 @@ cargo build --release
 cp target/release/agentrelay ~/.local/bin/   # or anywhere on your PATH
 ```
 
-It needs Rust 1.85 or newer (edition 2024). On Linux, the reply chime uses
+It needs Rust 1.90 or newer. On Linux, the reply chime uses
 PulseAudio when it's available, which includes WSLg. Elsewhere it uses the
 default audio output.
 
@@ -212,7 +202,7 @@ JSON-RPC over a WebSocket on that socket to list loaded threads, start turns
 metadata comes from `~/.codex/state_*.sqlite` and transcripts from the rollout
 files.
 
-**One model, two UIs.** A shared hub turns agents, transcripts and the
+**Both UIs.** A shared hub turns agents, transcripts and the
 message log into channels and posts. The TUI draws them with ratatui. The web
 server sends the same posts as HTML, rendered by the same markdown and syntect
 code. State lives in SQLite (WAL) at `~/.agentrelay/chat.db`, so each process
@@ -247,9 +237,9 @@ treat it like a shell.
 
 ## Platforms
 
-agentrelay is developed on Linux (including WSL). It should build on macOS,
-though that isn't tested regularly. Gemini CLI isn't supported because it has
-no IPC for a running session.
+agentrelay is developed and tested on Linux, including WSL. It's written to
+build on macOS, but hasn't been tested there. Gemini CLI isn't supported: a
+running Gemini session has no IPC to connect to.
 
 ## License
 
