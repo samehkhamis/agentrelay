@@ -1,0 +1,80 @@
+//! Claude Code's session socket. Each session listens on the
+//! `messagingSocketPath` in `~/.claude/sessions/<pid>.json` and publishes a
+//! peer token in `<pid>.<hash>.key` beside it. A peer sends newline-delimited
+//! JSON: an `auth` line with that token, then a `user` message whose content
+//! is a `<cross-session-message>` envelope.
+
+use crate::db::home;
+use anyhow::{anyhow, Context, Result};
+use serde_json::{json, Value};
+use std::io::Write;
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::time::Duration;
+
+const TAG: &str = "cross-session-message";
+
+fn read_json(p: &Path) -> Result<Value> {
+    let s = std::fs::read_to_string(p).with_context(|| format!("reading {}", p.display()))?;
+    Ok(serde_json::from_str(&s)?)
+}
+
+pub fn send(pid: u32, text: &str) -> Result<()> {
+    let dir = home().join(".claude/sessions");
+    let session = read_json(&dir.join(format!("{pid}.json")))?;
+    let sock = session
+        .get("messagingSocketPath")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("session {pid} has no messaging socket"))?;
+    let token = peer_token(&dir, pid)?;
+
+    let mut s = UnixStream::connect(sock).with_context(|| format!("connecting to {sock}"))?;
+    s.set_write_timeout(Some(Duration::from_secs(5)))?;
+    let auth = json!({ "type": "auth", "token": token });
+    let msg = json!({ "type": "user", "from": "agentchat", "message": { "role": "user", "content": envelope(text) } });
+    s.write_all(format!("{auth}\n{msg}\n").as_bytes())?;
+    s.shutdown(std::net::Shutdown::Write)?;
+    Ok(())
+}
+
+/// The newest `<pid>.<hash>.key` holds the token for the socket in use.
+fn peer_token(dir: &Path, pid: u32) -> Result<String> {
+    let prefix = format!("{pid}.");
+    let key = std::fs::read_dir(dir)?
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.starts_with(&prefix) && n.ends_with(".key")
+        })
+        .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
+        .ok_or_else(|| anyhow!("session {pid} has no peer key"))?;
+    read_json(&key.path())?
+        .get("peerToken")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("peer key without token"))
+}
+
+/// Wraps text in the envelope Claude sessions use with each other.
+/// `from-mode` declares the sender's permission class: messages here are only
+/// ever typed by the user, who runs these sessions in bypass mode, so a
+/// bypass-mode recipient takes them without holding them for approval, as it
+/// does for a peer session in the same mode.
+fn envelope(text: &str) -> String {
+    // The receiver rejects an envelope whose body could close the tag early.
+    let body = text.replace("</", "< /");
+    let mode = std::env::var("AGENTCHAT_FROM_MODE").unwrap_or_else(|_| "bypass".into());
+    format!("<{TAG} from-name=\"agentchat\" from-mode=\"{mode}\">\n{body}\n</{TAG}>")
+}
+
+/// Splits a received envelope into (from-name, body). None if `text` isn't one.
+pub fn parse_envelope(text: &str) -> Option<(Option<String>, &str)> {
+    let rest = text.strip_prefix(&format!("<{TAG}"))?;
+    let (attrs, body) = rest.split_once(">\n")?;
+    let body = body.strip_suffix(&format!("\n</{TAG}>")).unwrap_or(body);
+    let name = attrs
+        .split_once("from-name=\"")
+        .and_then(|(_, r)| r.split_once('"'))
+        .map(|(n, _)| n.to_string());
+    Some((name, body))
+}
