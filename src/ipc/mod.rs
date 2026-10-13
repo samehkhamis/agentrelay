@@ -53,12 +53,30 @@ pub fn decompose(text: &str) -> Option<Incoming<'_>> {
     Some(Incoming { from, body, files })
 }
 
+/// Who a message reached, and who it didn't and why.
+#[derive(Default)]
+pub struct Report {
+    pub delivered: Vec<String>,
+    pub failed: Vec<(String, String)>,
+}
+
+impl Report {
+    /// `delivered to 3 · failed: infra-68 (connection refused)`
+    pub fn note(&self) -> String {
+        let mut note = format!("delivered to {}", self.delivered.len());
+        if !self.failed.is_empty() {
+            let failed: Vec<String> = self.failed.iter().map(|(n, why)| format!("{n} ({why})")).collect();
+            note.push_str(&format!(" · failed: {}", failed.join(", ")));
+        }
+        note
+    }
+}
+
 /// Sends `text` to each agent: Claude sessions directly, Codex threads through
 /// one shared app-server connection, with `images` as image inputs (Claude
-/// reads them from the paths in the text). Returns (delivered, failed) names.
-pub fn deliver(targets: &[Agent], text: &str, images: &[PathBuf]) -> (Vec<String>, Vec<String>) {
-    let mut ok = Vec::new();
-    let mut failed = Vec::new();
+/// reads them from the paths in the text).
+pub fn deliver(targets: &[Agent], text: &str, images: &[PathBuf]) -> Report {
+    let mut report = Report::default();
     let mut server: Option<Result<codex::AppServer, String>> = None;
     for a in targets {
         let res = match &a.address {
@@ -69,11 +87,11 @@ pub fn deliver(targets: &[Agent], text: &str, images: &[PathBuf]) -> (Vec<String
             },
         };
         match res {
-            Ok(()) => ok.push(a.name.clone()),
-            Err(_) => failed.push(a.name.clone()),
+            Ok(()) => report.delivered.push(a.name.clone()),
+            Err(why) => report.failed.push((a.name.clone(), why)),
         }
     }
-    (ok, failed)
+    report
 }
 
 #[cfg(test)]
@@ -83,8 +101,8 @@ mod tests {
 
     #[test]
     fn decompose_inverts_compose() {
-        let text = compose("alex", Some("infra"), "look: here", &[PathBuf::from("/u/1-a.png")]);
+        let text = compose("alex", Some("api"), "look: here", &[PathBuf::from("/u/1-a.png")]);
         let m = decompose(&text).unwrap();
-        assert_eq!((m.from, m.body, m.files), ("alex in #infra", "look: here", vec!["/u/1-a.png".to_string()]));
+        assert_eq!((m.from, m.body, m.files), ("alex in #api", "look: here", vec!["/u/1-a.png".to_string()]));
     }
 }

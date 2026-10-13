@@ -33,8 +33,8 @@ const NEW_AGENT: &str = "+new";
 
 /// What background work reports back.
 enum Done {
-    /// A send: (delivered, failed) agent names.
-    Delivered(Vec<String>, Vec<String>),
+    /// A send's report.
+    Delivered(crate::ipc::Report),
     /// A task's one-line note.
     Note(String),
 }
@@ -121,7 +121,9 @@ impl App {
                 }
             }
             if last_poll.elapsed() >= POLL {
-                self.poll()?;
+                if let Err(e) = self.poll() {
+                    self.notify(format!("couldn't refresh: {e}")); // e.g. the database busy; try again
+                }
                 last_poll = Instant::now();
             }
         }
@@ -154,13 +156,9 @@ impl App {
         }
         while let Ok(done) = self.done_rx.try_recv() {
             match done {
-                Done::Delivered(ok, failed) => {
-                    let mut t = format!("delivered to {}", ok.len());
-                    if !failed.is_empty() {
-                        t.push_str(&format!(" · failed: {}", failed.join(", ")));
-                    }
-                    self.awaiting.extend(ok);
-                    self.notify(t);
+                Done::Delivered(report) => {
+                    self.notify(report.note());
+                    self.awaiting.extend(report.delivered);
                 }
                 Done::Note(note) => self.notify(note),
             }
@@ -203,13 +201,14 @@ impl App {
                 let task = self.hub.start_agent(&self.selected, kind, folder.as_deref(), &prompt);
                 self.background(task, format!("starting {}…", kind.as_str()));
             }
-            Some(Input::Rename(name)) => match self.hub.rename(&self.selected.clone(), &name) {
-                Ok((note, follow)) => {
+            Some(Input::Rename(name)) => {
+                let renamed = self.hub.rename(&self.selected.clone(), &name);
+                let task = renamed.map(|(task, follow)| {
                     self.selected = follow; // a renamed Claude DM reappears under its new name
-                    self.notify(note);
-                }
-                Err(e) => self.notify(e.to_string()),
-            },
+                    task
+                });
+                self.background(task, "renaming…".into());
+            }
             Some(Input::Shell(cmd)) => {
                 let task = self.hub.shell(&self.selected, &cmd);
                 self.background(task, "running…".into());
@@ -262,8 +261,7 @@ impl App {
                 self.notify(format!("delivering to {}…", delivery.targets.len()));
                 let tx = self.done_tx.clone();
                 std::thread::spawn(move || {
-                    let (ok, failed) = delivery.run();
-                    let _ = tx.send(Done::Delivered(ok, failed));
+                    let _ = tx.send(Done::Delivered(delivery.run()));
                 });
             }
         }

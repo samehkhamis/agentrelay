@@ -166,8 +166,7 @@ pub struct Delivery {
 }
 
 impl Delivery {
-    /// (delivered, failed) agent names.
-    pub fn run(&self) -> (Vec<String>, Vec<String>) {
+    pub fn run(&self) -> ipc::Report {
         ipc::deliver(&self.targets, &self.text, &self.images)
     }
 }
@@ -260,6 +259,9 @@ impl Hub {
         let replied = new.iter().filter(|m| m.kind == "status").map(|m| m.sender.clone()).collect();
         let new_channel = new.iter().any(|m| !self.channels.iter().any(|c| c.id == m.channel));
         self.msgs.extend(new);
+        if self.msgs.len() > 2 * HISTORY as usize {
+            self.msgs.drain(..self.msgs.len() - HISTORY as usize); // a long-running server
+        }
         if let Some(agents) = refreshed {
             self.agents = agents;
         }
@@ -467,20 +469,26 @@ impl Hub {
     }
 
     /// Renames a DM's conversation, as `/rename` does in the agent: a Claude
-    /// session takes the new name (so its DM moves), a Codex thread gets it
-    /// as its title. Returns the note and the channel to follow.
-    pub fn rename(&self, chan_id: &str, name: &str) -> Result<(String, String)> {
+    /// session takes the new name (so its DM moves to the returned channel), a
+    /// Codex thread gets it as its title.
+    pub fn rename(&self, chan_id: &str, name: &str) -> Result<(Task, String)> {
         let agent = self.dm_agent(chan_id, "/rename")?;
-        match &agent.address {
-            Address::Claude(pid) => {
-                ipc::claude::rename(*pid, name)?;
-                Ok((format!("renamed {} to {name}", agent.name), format!("dm:{name}")))
+        let follow = match agent.address {
+            Address::Claude(_) => format!("dm:{name}"),
+            Address::Codex(_) => chan_id.to_string(),
+        };
+        let name = name.to_string();
+        let task = Task(Box::new(move || {
+            let done = match &agent.address {
+                Address::Claude(pid) => ipc::claude::rename(*pid, &name),
+                Address::Codex(thread) => ipc::codex::AppServer::connect().and_then(|mut s| s.rename(thread, &name)),
+            };
+            match done {
+                Ok(()) => format!("renamed {} to {name}", agent.name),
+                Err(e) => format!("couldn't rename: {e}"),
             }
-            Address::Codex(thread) => {
-                ipc::codex::AppServer::connect()?.rename(thread, name)?;
-                Ok((format!("renamed {}'s thread to {name}", agent.name), chan_id.to_string()))
-            }
-        }
+        }));
+        Ok((task, follow))
     }
 
     /// Runs a command for a DM's agent, like `!` in its own terminal. Codex
@@ -513,33 +521,57 @@ const SHELL_OUTPUT: usize = 16_000;
 const SHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Runs a command with the user's shell in `cwd`: (stdout and stderr, exit
-/// code; None if it didn't finish within the timeout).
+/// code; None if it didn't finish within the timeout, when its whole process
+/// group is killed).
 fn run_shell(command: &str, cwd: &str) -> (String, Option<i32>) {
+    use std::io::Read;
+    use std::os::unix::process::CommandExt;
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
     let child = std::process::Command::new(shell)
         .args(["-lc", command])
         .current_dir(cwd)
+        .process_group(0)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn();
-    let child = match child {
+    let mut child = match child {
         Ok(c) => c,
         Err(e) => return (e.to_string(), None),
     };
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
-    });
-    match rx.recv_timeout(SHELL_TIMEOUT) {
-        Ok(Ok(out)) => {
-            let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
-            let start = text.char_indices().rev().nth(SHELL_OUTPUT).map_or(0, |(i, _)| i);
-            (text[start..].to_string(), out.status.code())
+    // Drain both pipes on their own threads so a chatty command can't block.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut out = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut out);
+            }
+            out
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let deadline = std::time::Instant::now() + SHELL_TIMEOUT;
+    let exit = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.code(),
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
+            _ => {
+                if let Some(pid) = rustix::process::Pid::from_raw(child.id() as i32) {
+                    let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::Kill);
+                }
+                let _ = child.wait();
+                break None;
+            }
         }
-        Ok(Err(e)) => (e.to_string(), None),
-        Err(_) => (format!("still running after {}s", SHELL_TIMEOUT.as_secs()), None),
+    };
+    let mut text = String::from_utf8_lossy(&stdout.join().unwrap_or_default()).to_string();
+    text.push_str(&String::from_utf8_lossy(&stderr.join().unwrap_or_default()));
+    if exit.is_none() {
+        text.push_str(&format!("\n(killed after {}s)", SHELL_TIMEOUT.as_secs()));
     }
+    let start = text.char_indices().rev().nth(SHELL_OUTPUT).map_or(0, |(i, _)| i);
+    (text[start..].to_string(), exit)
 }
 
 #[cfg(test)]
@@ -550,7 +582,7 @@ mod tests {
     #[test]
     fn completes_commands_and_arguments() {
         use super::completions;
-        let labels = |line: &str| completions(line, &["/home/x/code/infra".into()]).into_iter().map(|c| c.line).collect::<Vec<_>>();
+        let labels = |line: &str| completions(line, &["/home/x/code/api".into()]).into_iter().map(|c| c.line).collect::<Vec<_>>();
         assert_eq!(labels("/s"), ["/status", "/sound"]);
         assert_eq!(labels("/re"), ["/rename "]);
         assert_eq!(labels("/new c"), ["/new claude ", "/new codex "]);

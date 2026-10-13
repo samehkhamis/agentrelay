@@ -17,7 +17,15 @@ const STALE_MS: i64 = 6_000;
 pub fn spawn() -> Receiver<Vec<Agent>> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let Ok(mut conn) = db::open() else { return };
+        let mut conn = loop {
+            match db::open() {
+                Ok(c) => break c,
+                Err(e) => {
+                    eprintln!("watcher: {e:#}");
+                    std::thread::sleep(TICK);
+                }
+            }
+        };
         loop {
             let agents = shared(&conn).unwrap_or_else(|| discover(&mut conn));
             if tx.send(agents).is_err() {

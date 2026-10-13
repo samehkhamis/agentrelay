@@ -53,9 +53,9 @@ fn main() -> Result<()> {
             let Some(agent) = agents::discover().into_iter().find(|a| a.name == args[1]) else {
                 bail!("no agent named {}", args[1]);
             };
-            let (_, failed) = ipc::deliver(std::slice::from_ref(&agent), &args[2..].join(" "), &[]);
-            if !failed.is_empty() {
-                bail!("delivery to {} failed", agent.name);
+            let report = ipc::deliver(std::slice::from_ref(&agent), &args[2..].join(" "), &[]);
+            if let Some((_, why)) = report.failed.first() {
+                bail!("delivery to {} failed: {why}", agent.name);
             }
             println!("delivered to {}", agent.name);
             Ok(())

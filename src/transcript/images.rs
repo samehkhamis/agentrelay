@@ -4,7 +4,11 @@
 
 use crate::uploads;
 use base64::Engine;
-use std::hash::{DefaultHasher, Hash, Hasher};
+
+/// FNV-1a: a stable content hash, so names survive toolchain upgrades.
+fn hash(data: &str) -> u64 {
+    data.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
+}
 
 /// Stores a base64 image of `media_type` (e.g. `image/png`); returns its path.
 pub fn store(media_type: &str, data: &str) -> Option<String> {
@@ -14,9 +18,10 @@ pub fn store(media_type: &str, data: &str) -> Option<String> {
         "image/webp" => "webp",
         _ => "png",
     };
-    let mut h = DefaultHasher::new();
-    data.hash(&mut h);
-    let name = format!("image-{:016x}.{ext}", h.finish());
+    let name = format!("image-{:016x}.{ext}", hash(data));
+    if let (path, true) = uploads::named(&name) {
+        return Some(path.display().to_string()); // stored before: skip decoding
+    }
     let bytes = base64::engine::general_purpose::STANDARD.decode(data.trim()).ok()?;
     uploads::store_named(&name, &bytes).ok().map(|p| p.display().to_string())
 }

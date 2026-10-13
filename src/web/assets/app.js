@@ -292,7 +292,7 @@ async function submit() {
   const r = await api("/api/send", { channel: current, text, files });
   if (r.delivered) {
     r.delivered.forEach((a) => awaiting.add(a));
-    toast(`delivered to ${r.delivered.length}${r.failed.length ? ` · failed: ${r.failed.join(", ")}` : ""}`);
+    toast(r.note);
   } else if (r.note) {
     toast(r.note);
     if (r.theme) await refreshState();

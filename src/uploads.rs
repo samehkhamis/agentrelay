@@ -19,18 +19,35 @@ pub fn save(name: &str, bytes: &[u8]) -> Result<PathBuf> {
         bail!("{name} is larger than {} MB", MAX_BYTES >> 20);
     }
     std::fs::create_dir_all(dir())?;
-    let path = dir().join(format!("{}-{}", db::now_ms(), sanitize(name)));
-    std::fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
-    Ok(path)
+    let (ts, name) = (db::now_ms(), sanitize(name));
+    // Same name in the same millisecond (two `shot.png`s dropped together):
+    // bump the stamp rather than overwrite.
+    for n in 0.. {
+        let path = dir().join(format!("{}-{name}", ts + n));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                std::io::Write::write_all(&mut f, bytes).with_context(|| format!("writing {}", path.display()))?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e).with_context(|| format!("writing {}", path.display())),
+        }
+    }
+    unreachable!()
 }
 
-/// Stores bytes under a fixed name, once; returns the stored path.
-pub fn store_named(name: &str, bytes: &[u8]) -> Result<PathBuf> {
+/// The stored path for a fixed name, and whether it's already there.
+pub fn named(name: &str) -> (PathBuf, bool) {
     let path = dir().join(sanitize(name));
-    if !path.exists() {
-        std::fs::create_dir_all(dir())?;
-        std::fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
-    }
+    let exists = path.exists();
+    (path, exists)
+}
+
+/// Stores bytes under a fixed name; returns the stored path.
+pub fn store_named(name: &str, bytes: &[u8]) -> Result<PathBuf> {
+    let (path, _) = named(name);
+    std::fs::create_dir_all(dir())?;
+    std::fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
     Ok(path)
 }
 

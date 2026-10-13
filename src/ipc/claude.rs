@@ -56,7 +56,7 @@ fn write(pid: u32, frame: &Value) -> Result<()> {
 pub fn start(cwd: &Path, prompt: &str) -> Result<String> {
     let out = Command::new("claude")
         .args(["--bg", "--permission-mode", "bypassPermissions"])
-        .args((!prompt.is_empty()).then_some(prompt))
+        .args((!prompt.is_empty()).then_some(["--", prompt]).into_iter().flatten())
         .current_dir(cwd)
         .stdin(Stdio::null())
         .output()

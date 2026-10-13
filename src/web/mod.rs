@@ -1,9 +1,10 @@
 //! The web UI: a local HTTP server over the same [`Hub`] as the TUI. Serves
 //! the page and a small JSON API the page polls.
 //!
-//! The API can type prompts into agents, so it only binds to 127.0.0.1, only
-//! answers requests addressed to localhost or this machine's own tailnet name
-//! (for `tailscale serve`; this check stops DNS rebinding), and every
+//! The API can type prompts into agents and run commands, so it only binds to
+//! 127.0.0.1 and only answers requests addressed to localhost (against DNS
+//! rebinding), or to this machine's tailnet name when `tailscale serve` says
+//! the requester is the machine's owner. Every
 //! API call must carry an `X-Agentchat` header, which other sites can't add to
 //! a cross-origin request without a CORS preflight this server never grants.
 //! `/files/<id>` serves only stored uploads.
@@ -21,7 +22,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, Server};
 
 pub const DEFAULT_PORT: u16 = 3000;
@@ -38,18 +39,52 @@ struct Shared {
     html: Mutex<HashMap<String, String>>,
     /// Host names requests may be addressed to, besides the tailnet name.
     hosts: [String; 2],
+    /// This machine on the tailnet, looked up now and then.
+    tailnet: Mutex<(Option<Instant>, Option<Tailnet>)>,
+}
+
+/// This machine's tailnet name and its owner's login.
+#[derive(Clone)]
+struct Tailnet {
+    name: String,
+    owner: String,
+}
+
+const TAILNET_REFRESH: Duration = Duration::from_secs(60);
+
+impl Shared {
+    fn tailnet(&self) -> Option<Tailnet> {
+        let mut cached = self.tailnet.lock().unwrap();
+        if cached.0.is_none_or(|at| at.elapsed() > TAILNET_REFRESH) {
+            *cached = (Some(Instant::now()), tailnet());
+        }
+        cached.1.clone()
+    }
+
+    /// Localhost, or the tailnet name with `tailscale serve` vouching that
+    /// the requester is the machine's owner.
+    fn allowed(&self, req: &Request) -> bool {
+        let host = header(req, "Host").unwrap_or("").to_ascii_lowercase();
+        if self.hosts.contains(&host) {
+            return true;
+        }
+        let login = header(req, "Tailscale-User-Login").unwrap_or("");
+        self.tailnet().is_some_and(|t| host == t.name && login.eq_ignore_ascii_case(&t.owner))
+    }
 }
 
 /// Runs the server in the foreground until `/api/stop`.
 pub fn serve(port: u16) -> Result<()> {
     let server = Server::http(("127.0.0.1", port)).map_err(|e| anyhow!("listening on 127.0.0.1:{port}: {e}"))?;
     let hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
-    let shared = Arc::new(Shared { hub: Mutex::new(Hub::open()?), html: Mutex::default(), hosts });
+    let shared = Arc::new(Shared { hub: Mutex::new(Hub::open()?), html: Mutex::default(), hosts, tailnet: Mutex::default() });
     std::fs::write(info_path(), json!({ "pid": std::process::id(), "port": port }).to_string())?;
 
     let poller = shared.clone();
     std::thread::spawn(move || loop {
-        let _ = poller.hub.lock().unwrap().poll();
+        if let Err(e) = poller.hub.lock().unwrap().poll() {
+            eprintln!("poll: {e:#}"); // goes to server.log; try again next tick
+        }
         std::thread::sleep(POLL);
     });
     for req in server.incoming_requests() {
@@ -78,6 +113,7 @@ pub fn start(port: u16) -> Result<u16> {
         return Ok(p);
     }
     use std::os::unix::process::CommandExt;
+    std::fs::create_dir_all(db::data_dir())?;
     let log = std::fs::File::create(db::data_dir().join("server.log"))?;
     std::process::Command::new(std::env::current_exe()?)
         .args(["serve", "--port", &port.to_string()])
@@ -119,17 +155,19 @@ fn call(port: u16, method: &str, path: &str) -> Result<String> {
     }
 }
 
-/// This machine's tailnet name (e.g. `box.tailnet.ts.net`), from the local
-/// tailscaled API, so `tailscale serve` to this port works with no setup.
-fn tailnet_name() -> Option<String> {
+/// This machine's tailnet name (e.g. `box.tailnet.ts.net`) and owner, from
+/// the local tailscaled API.
+fn tailnet() -> Option<Tailnet> {
     let mut s = std::os::unix::net::UnixStream::connect("/var/run/tailscale/tailscaled.sock").ok()?;
     s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
     s.write_all(b"GET /localapi/v0/status HTTP/1.0\r\nHost: local-tailscaled.sock\r\n\r\n").ok()?;
     let mut out = String::new();
     s.read_to_string(&mut out).ok()?;
     let status: Value = serde_json::from_str(out.split_once("\r\n\r\n")?.1).ok()?;
-    let name = status.pointer("/Self/DNSName")?.as_str()?;
-    Some(name.trim_end_matches('.').to_ascii_lowercase())
+    let name = status.pointer("/Self/DNSName")?.as_str()?.trim_end_matches('.').to_ascii_lowercase();
+    let user = status.pointer("/Self/UserID")?.as_u64()?.to_string();
+    let owner = status.get("User")?.get(&user)?.get("LoginName")?.as_str()?.to_string();
+    Some(Tailnet { name, owner })
 }
 
 // ---------------------------------------------------------------- routing
@@ -149,9 +187,7 @@ fn respond_json(req: Request, v: Value) {
 }
 
 fn handle(mut req: Request, shared: &Shared) {
-    let host = header(&req, "Host").unwrap_or("").to_ascii_lowercase();
-    let host_ok = shared.hosts.contains(&host) || tailnet_name().is_some_and(|name| host == name);
-    if !host_ok {
+    if !shared.allowed(&req) {
         return respond(req, 403, "text/plain", "forbidden");
     }
     let (path, query) = req.url().split_once('?').unwrap_or((req.url(), ""));
@@ -356,8 +392,9 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
             return json!({ "note": task.map_or_else(|e| e.to_string(), hub::Task::run) });
         }
         Some(Input::Rename(name)) => {
-            return match shared.hub.lock().unwrap().rename(channel, &name) {
-                Ok((note, follow)) => json!({ "note": note, "channel": follow }),
+            let renamed = shared.hub.lock().unwrap().rename(channel, &name); // run outside the lock
+            return match renamed {
+                Ok((task, follow)) => json!({ "note": task.run(), "channel": follow }),
                 Err(e) => json!({ "note": e.to_string() }),
             };
         }
@@ -374,8 +411,8 @@ fn send(shared: &Shared, channel: &str, text: &str, files: &[PathBuf]) -> Value 
         Err(e) => json!({ "note": format!("failed: {e}") }),
         Ok(None) => json!({ "note": "nobody online here to deliver to" }),
         Ok(Some(d)) => {
-            let (delivered, failed) = d.run();
-            json!({ "delivered": delivered, "failed": failed })
+            let report = d.run();
+            json!({ "delivered": report.delivered, "note": report.note() })
         }
     }
 }
