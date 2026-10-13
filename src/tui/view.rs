@@ -90,7 +90,7 @@ impl App {
         }
         rows.push((Line::styled("  ＋ new agent", Style::new().fg(theme::t().sidebar_fg)), Some(super::NEW_AGENT)));
         rows.push((Line::default(), None));
-        rows.push((Line::styled(" ! shell · ^E tools · ^O files · ^T theme", dim), None));
+        rows.push((Line::styled(" ↑ select · ! shell · ^O files · ^T theme", dim), None));
 
         // Keep the selected row on screen.
         let h = area.height as usize;
@@ -180,9 +180,9 @@ impl App {
     fn draw_feed(&mut self, f: &mut Frame, area: Rect) {
         let chan = self.current().clone();
         let posts = self.hub.posts(&chan);
-        let feed::Layout { mut lines, slots, tools } = if posts.is_empty() {
+        let feed::Layout { mut lines, slots, tools, items } = if posts.is_empty() {
             let hint = Line::styled(format!(" {}", self.hub.empty_hint(&chan)), Style::new().fg(theme::t().dim));
-            feed::Layout { lines: vec![Line::default(), hint], slots: Vec::new(), tools: Vec::new() }
+            feed::Layout { lines: vec![Line::default(), hint], slots: Vec::new(), tools: Vec::new(), items: Vec::new() }
         } else {
             let width = area.width.saturating_sub(1) as usize;
             feed::layout(&posts, width, &mut self.cache, self.images.as_mut(), &self.expanded)
@@ -191,6 +191,24 @@ impl App {
 
         let h = area.height as usize;
         self.feed_height = h;
+        // Keyboard selection: keep the selected post on screen and mark it.
+        if let Some((range, _)) = items.iter().find(|(_, k)| Some(k) == self.cursor.as_ref()) {
+            let total = lines.len();
+            let top = total.saturating_sub(h + self.scroll);
+            if range.start < top {
+                self.scroll = total.saturating_sub(h + range.start);
+            } else if range.end > top + h {
+                self.scroll = total.saturating_sub(range.end.max(h));
+            }
+            let bar = Span::styled("▌ ", Style::new().fg(theme::t().link));
+            for line in &mut lines[range.clone()] {
+                match line.spans.first_mut() {
+                    Some(first) => *first = bar.clone(),
+                    None => line.spans.push(bar.clone()),
+                }
+            }
+        }
+        self.feed_items = items.into_iter().map(|(_, k)| k).collect();
         self.scroll = self.scroll.min(lines.len().saturating_sub(h));
         let start = lines.len().saturating_sub(h + self.scroll);
         let end = (start + h).min(lines.len());
@@ -200,7 +218,8 @@ impl App {
             .filter(|(line, _)| (start..end).contains(line))
             .map(|(line, t)| (area.y + (line - start) as u16, t.clone()))
             .collect();
-        self.feed_tools = tools.into_iter().filter(|(_, t)| t.expandable).map(|(_, t)| t.key).collect();
+        self.feed_tools = tools.iter().filter(|(_, t)| t.expandable).map(|(_, t)| t.key.clone()).collect();
+        self.tool_info = tools.into_iter().map(|(_, t)| (t.key.clone(), t)).collect();
         // Images go into their reserved rows when those are fully on screen.
         if let Some(images) = self.images.as_mut() {
             for s in slots.iter().filter(|s| s.line >= start && s.line + s.rows as usize <= end) {

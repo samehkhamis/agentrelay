@@ -64,6 +64,11 @@ pub struct App {
     viewer: Option<viewer::Viewer>,
     viewer_area: Rect,
     picker: Option<(Vec<String>, usize)>,
+    /// Keyboard selection: the selected post's key, the feed's posts in
+    /// order, and its tool calls by key.
+    cursor: Option<String>,
+    feed_items: Vec<String>,
+    tool_info: std::collections::HashMap<String, feed::ToolRow>,
     /// Sidebar screen row -> channel id, for clicks.
     sidebar_rows: Vec<(u16, String)>,
     toast: Option<(String, Instant)>,
@@ -112,6 +117,9 @@ impl App {
             viewer: None,
             viewer_area: Rect::default(),
             picker: None,
+            cursor: None,
+            feed_items: Vec::new(),
+            tool_info: Default::default(),
             toast: Some(("discovering agents…".into(), Instant::now())),
             sound: sound::enabled_by_default(),
             awaiting: HashSet::new(),
@@ -189,6 +197,7 @@ impl App {
     }
 
     fn select(&mut self, id: &str) {
+        self.cursor = None;
         if id == NEW_AGENT {
             self.editor.set("/new claude ");
             self.notify("/new claude|codex [folder] [prompt] · Enter to start");
@@ -357,8 +366,61 @@ impl App {
         true
     }
 
+    /// Moves the keyboard selection through the feed's posts: up from the
+    /// composer selects the newest; down past the newest returns to typing.
+    fn move_cursor(&mut self, up: bool) {
+        let n = self.feed_items.len();
+        let at = self.cursor.as_ref().and_then(|k| self.feed_items.iter().position(|i| i == k));
+        let next = match (at, up) {
+            (None, true) => n.checked_sub(1),
+            (None, false) => None,
+            (Some(i), true) => Some(i.saturating_sub(1)),
+            (Some(i), false) => (i + 1 < n).then_some(i + 1),
+        };
+        self.cursor = next.map(|i| self.feed_items[i].clone());
+    }
+
+    /// Keys while a post is selected. False if none is, or the key isn't one.
+    fn on_cursor_key(&mut self, k: KeyEvent) -> bool {
+        let Some(key) = self.cursor.clone() else { return false };
+        let actions = self.hub.channel(&self.selected).and_then(|c| self.hub.post_actions(c, &key));
+        let (files, text) = actions.unwrap_or_default();
+        let tool = self.tool_info.get(&key).cloned();
+        match k.code {
+            KeyCode::Up | KeyCode::Down => self.move_cursor(k.code == KeyCode::Up),
+            KeyCode::Esc => self.cursor = None,
+            KeyCode::Enter => match tool {
+                Some(t) if t.expandable => {
+                    if !self.expanded.remove(&key) {
+                        self.expanded.insert(key);
+                    }
+                }
+                _ => self.open_files(files),
+            },
+            KeyCode::Char('o') => self.open_files(files),
+            KeyCode::Char('y') => {
+                copy_to_clipboard(&text);
+                self.notify(format!("copied {} characters", text.chars().count()));
+            }
+            _ => {
+                self.cursor = None; // anything else goes back to typing
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Opens a post's one file, or lists them when there are several.
+    fn open_files(&mut self, files: Vec<(String, crate::files::FileRef)>) {
+        match files.len() {
+            0 => self.notify("no files here"),
+            1 => self.open_file(&files[0].0),
+            _ => self.picker = Some((files.into_iter().map(|(raw, _)| raw).collect(), 0)),
+        }
+    }
+
     fn on_key(&mut self, k: KeyEvent) -> Result<()> {
-        if self.on_picker_key(k) || self.on_suggestion_key(k)? {
+        if self.on_picker_key(k) || self.on_suggestion_key(k)? || self.on_cursor_key(k) {
             return Ok(());
         }
         let before = self.editor.text().to_string();
@@ -415,8 +477,7 @@ impl App {
             KeyCode::Tab => self.move_selection(1),
             KeyCode::PageUp => self.scroll += page,
             KeyCode::PageDown => self.scroll = self.scroll.saturating_sub(page),
-            KeyCode::Up if self.editor.is_empty() => self.scroll += 3,
-            KeyCode::Down if self.editor.is_empty() => self.scroll = self.scroll.saturating_sub(3),
+            KeyCode::Up if self.editor.is_empty() => self.move_cursor(true),
             KeyCode::Esc => self.scroll = 0,
             KeyCode::Enter => self.submit()?,
             KeyCode::Backspace if self.editor.is_empty() && !self.pending.is_empty() => {
@@ -482,4 +543,18 @@ pub fn doctor() {
             println!("{k}={v}");
         }
     }
+}
+
+/// Copies text to the system clipboard through the terminal (OSC 52), which
+/// works over SSH and in WezTerm, kitty, iTerm2, Windows Terminal and others.
+fn copy_to_clipboard(text: &str) {
+    use base64::Engine;
+    use std::io::Write;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(text);
+    let osc = format!("\x1b]52;c;{b64}\x07");
+    // Inside tmux, the sequence has to be passed through to the outer terminal.
+    let seq = if std::env::var_os("TMUX").is_some() { format!("\x1bPtmux;\x1b{osc}\x1b\\") } else { osc };
+    let mut out = std::io::stdout();
+    let _ = out.write_all(seq.as_bytes());
+    let _ = out.flush();
 }

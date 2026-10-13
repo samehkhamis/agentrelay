@@ -27,6 +27,44 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
 const HISTORY: i64 = 3000;
+/// A post's resolved file mentions: its tool call's file, or the inline code
+/// in its text. Images are left out; they show inline already.
+fn mentions(p: &Post) -> Vec<(String, FileRef)> {
+    let cwd = p.cwd.unwrap_or("");
+    let raws: Vec<String> = match &p.body {
+        feed::Body::Tool { path: Some(path), .. } => vec![path.to_string()],
+        feed::Body::Markdown { text, .. } => crate::highlight::markdown(text)
+            .filter_map(|e| match e {
+                pulldown_cmark::Event::Code(c) => Some(c.to_string()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let mut out: Vec<(String, FileRef)> = Vec::new();
+    for raw in raws {
+        let new = |f: &FileRef| !uploads::is_image(&f.path) && !out.iter().any(|(_, o)| o.path == f.path);
+        if let Some(f) = files::resolve(cwd, &raw).filter(new) {
+            out.push((raw, f));
+        }
+    }
+    out
+}
+
+/// The contents of fenced code blocks, for copying a tool call's input.
+fn unfence(markdown: &str) -> String {
+    let mut out = Vec::new();
+    let mut inside = false;
+    for line in markdown.lines() {
+        if line.trim_start().starts_with("```") {
+            inside = !inside;
+        } else if inside {
+            out.push(line);
+        }
+    }
+    if out.is_empty() { markdown.to_string() } else { out.join("\n") }
+}
+
 /// A message logged and ready to deliver: run [`Delivery::run`] off the UI thread.
 pub struct Delivery {
     targets: Vec<Agent>,
@@ -213,26 +251,26 @@ impl Hub {
     pub fn mentioned_files(&self, chan: &Channel) -> Vec<(String, FileRef)> {
         let mut out: Vec<(String, FileRef)> = Vec::new();
         for p in self.posts(chan).iter().rev() {
-            let cwd = p.cwd.unwrap_or("");
-            let raws: Vec<String> = match &p.body {
-                feed::Body::Tool { path: Some(path), .. } => vec![path.to_string()],
-                feed::Body::Markdown { text, .. } => crate::highlight::markdown(text)
-                    .filter_map(|e| match e {
-                        pulldown_cmark::Event::Code(c) => Some(c.to_string()),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            };
-            for raw in raws {
-                // Images already show inline; the file views are for text.
-                let new = |f: &FileRef| !uploads::is_image(&f.path) && !out.iter().any(|(_, o)| o.path == f.path);
-                if let Some(f) = files::resolve(cwd, &raw).filter(new) {
+            for (raw, f) in mentions(p) {
+                if !out.iter().any(|(_, o)| o.path == f.path) {
                     out.push((raw, f));
                 }
             }
         }
         out
+    }
+
+    /// One post's file mentions, and its text to copy: a message's markdown,
+    /// a tool call's full input (unfenced) or its one-liner.
+    pub fn post_actions(&self, chan: &Channel, key: &str) -> Option<(Vec<(String, FileRef)>, String)> {
+        let posts = self.posts(chan);
+        let p = posts.iter().find(|p| p.key == key)?;
+        let text = match &p.body {
+            feed::Body::Markdown { text, .. } => text.to_string(),
+            feed::Body::Tool { full: "", detail, .. } => detail.to_string(),
+            feed::Body::Tool { full, .. } => unfence(full),
+        };
+        Some((mentions(p), text))
     }
 
     /// Opens a file mentioned in a channel for viewing: inside one of its

@@ -43,12 +43,13 @@ pub struct ToolRow {
     pub expandable: bool,
 }
 
-/// A laid-out feed: its lines, rows reserved for images, and the tool call
-/// lines (by line index).
+/// A laid-out feed: its lines, rows reserved for images, the tool call
+/// lines (by line index), and each post's line range (for keyboard selection).
 pub struct Layout {
     pub lines: Vec<Line<'static>>,
     pub slots: Vec<Slot>,
     pub tools: Vec<(usize, ToolRow)>,
+    pub items: Vec<(std::ops::Range<usize>, String)>,
 }
 
 pub fn layout(
@@ -62,6 +63,7 @@ pub fn layout(
     let mut lines = Vec::new();
     let mut slots = Vec::new();
     let mut tools = Vec::new();
+    let mut items = Vec::new();
     for p in posts {
         if p.new_day {
             lines.push(Line::default());
@@ -72,6 +74,7 @@ pub fn layout(
             lines.push(gutter(p, header(p)));
         }
         let open = expanded.contains(&p.key);
+        let item_start = lines.len();
         if let Body::Tool { full, path, .. } = &p.body {
             let file = path.filter(|f| files::resolve(p.cwd.unwrap_or(""), f).is_some()).map(str::to_string);
             tools.push((lines.len(), ToolRow { key: p.key.clone(), file, expandable: !full.is_empty() }));
@@ -99,8 +102,9 @@ pub fn layout(
                 lines.extend((0..rows).map(|_| gutter(p, Line::default())));
             }
         }
+        items.push((item_start..lines.len(), p.key.clone()));
     }
-    Layout { lines, slots, tools }
+    Layout { lines, slots, tools, items }
 }
 
 fn indent(mut l: Line<'static>) -> Line<'static> {
