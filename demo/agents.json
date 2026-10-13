@@ -1,0 +1,62 @@
+[
+  {
+    "name": "webapp-3f",
+    "kind": "claude",
+    "group": "webapp",
+    "presence": "busy",
+    "cwd": "~/code/webapp",
+    "title": null,
+    "transcript": "claude-webapp.jsonl",
+    "address": {
+      "Claude": 1
+    }
+  },
+  {
+    "name": "webapp-a91c",
+    "kind": "codex",
+    "group": "webapp",
+    "presence": "online",
+    "cwd": "~/code/webapp",
+    "title": "Flaky checkout test",
+    "transcript": "codex-webapp.jsonl",
+    "address": {
+      "Codex": "demo-a91c"
+    }
+  },
+  {
+    "name": "api-7e",
+    "kind": "claude",
+    "group": "api",
+    "presence": "online",
+    "cwd": "~/code/api",
+    "title": null,
+    "transcript": "claude-api.jsonl",
+    "address": {
+      "Claude": 2
+    }
+  },
+  {
+    "name": "infra-c2",
+    "kind": "claude",
+    "group": "infra",
+    "presence": "online",
+    "cwd": "~/code/infra",
+    "title": null,
+    "transcript": "claude-infra.jsonl",
+    "address": {
+      "Claude": 3
+    }
+  },
+  {
+    "name": "docs-b4e1",
+    "kind": "codex",
+    "group": "docs",
+    "presence": "away",
+    "cwd": "~/code/docs",
+    "title": "Getting started guide",
+    "transcript": "codex-docs.jsonl",
+    "address": {
+      "Codex": "demo-b4e1"
+    }
+  }
+]
