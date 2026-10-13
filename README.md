@@ -237,8 +237,7 @@ treat it like a shell.
 
 ## Platforms
 
-agentrelay is developed and tested on Linux, including WSL. It's written to
-build on macOS, but hasn't been tested there. Gemini CLI isn't supported: a
+agentrelay runs on Linux (including WSL) and macOS. Gemini CLI isn't supported: a
 running Gemini session has no IPC to connect to.
 
 ## License
