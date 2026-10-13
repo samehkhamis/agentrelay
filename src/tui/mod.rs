@@ -67,6 +67,8 @@ pub struct App {
     /// Keyboard selection: the selected post's key, the feed's posts in
     /// order, and its tool calls by key.
     cursor: Option<String>,
+    /// The selection the view was last positioned for.
+    cursor_placed: Option<String>,
     feed_items: Vec<String>,
     tool_info: std::collections::HashMap<String, feed::ToolRow>,
     /// Sidebar screen row -> channel id, for clicks.
@@ -118,6 +120,7 @@ impl App {
             viewer_area: Rect::default(),
             picker: None,
             cursor: None,
+            cursor_placed: None,
             feed_items: Vec::new(),
             tool_info: Default::default(),
             toast: Some(("discovering agents…".into(), Instant::now())),
@@ -402,6 +405,8 @@ impl App {
                 copy_to_clipboard(&text);
                 self.notify(format!("copied {} characters", text.chars().count()));
             }
+            // Scrolling through a long selected post keeps it selected.
+            KeyCode::PageUp | KeyCode::PageDown => return false,
             _ => {
                 self.cursor = None; // anything else goes back to typing
                 return false;

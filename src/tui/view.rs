@@ -191,14 +191,18 @@ impl App {
 
         let h = area.height as usize;
         self.feed_height = h;
-        // Keyboard selection: keep the selected post on screen and mark it.
+        // Keyboard selection: bring a newly selected post into view (from its
+        // top if it's taller than the screen), then leave scrolling to the user.
         if let Some((range, _)) = items.iter().find(|(_, k)| Some(k) == self.cursor.as_ref()) {
-            let total = lines.len();
-            let top = total.saturating_sub(h + self.scroll);
-            if range.start < top {
-                self.scroll = total.saturating_sub(h + range.start);
-            } else if range.end > top + h {
-                self.scroll = total.saturating_sub(range.end.max(h));
+            if self.cursor_placed != self.cursor {
+                self.cursor_placed = self.cursor.clone();
+                let total = lines.len();
+                let top = total.saturating_sub(h + self.scroll);
+                if range.start < top || range.len() > h {
+                    self.scroll = total.saturating_sub(h + range.start);
+                } else if range.end > top + h {
+                    self.scroll = total.saturating_sub(range.end);
+                }
             }
             let bar = Span::styled("▌ ", Style::new().fg(theme::t().link));
             for line in &mut lines[range.clone()] {
