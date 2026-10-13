@@ -6,6 +6,7 @@
 
 use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui_image::picker::cap_parser::QueryStdioOptions;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::StatefulImage;
@@ -20,9 +21,6 @@ const KEEP: usize = 48;
 
 pub struct Images {
     picker: Picker,
-    /// Whether the terminal answered the capability query. Through Windows'
-    /// ConPTY (e.g. WezTerm on Windows running WSL) it never does.
-    pub answered: bool,
     /// Pixel size per image, read from its header.
     dims: HashMap<String, Option<(u32, u32)>>,
     ready: HashMap<String, StatefulProtocol>,
@@ -32,36 +30,38 @@ impl Images {
     /// Asks the terminal what it supports. Call after entering the alternate
     /// screen and before reading events. None if images are turned off.
     pub fn detect() -> Option<Images> {
-        let forced = std::env::var("AGENTCHAT_IMAGES").unwrap_or_default().to_ascii_lowercase();
-        if forced == "off" || forced == "0" {
+        let setting = std::env::var("AGENTCHAT_IMAGES").unwrap_or_default().to_ascii_lowercase();
+        if setting == "off" || setting == "0" {
             return None;
         }
-        let mut picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
-        let answered = !picker.capabilities().is_empty();
-        let protocol = match forced.as_str() {
+        let mut options = QueryStdioOptions::default();
+        if wezterm_outermost() {
+            // ratatui-image draws Kitty images with Unicode placeholders, which
+            // WezTerm doesn't implement, so for WezTerm it skips Kitty and Sixel
+            // and uses iTerm2. It recognizes WezTerm by WEZTERM_EXECUTABLE,
+            // which doesn't reach WSL; TERM_PROGRAM does.
+            options.blacklist_protocols = vec![ProtocolType::Kitty, ProtocolType::Sixel];
+        }
+        let mut picker = Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| Picker::halfblocks());
+        let forced = match setting.as_str() {
             "kitty" => Some(ProtocolType::Kitty),
             "sixel" => Some(ProtocolType::Sixel),
             "iterm2" => Some(ProtocolType::Iterm2),
             "halfblocks" => Some(ProtocolType::Halfblocks),
-            // Without an answer the picker guesses from env vars (e.g. iTerm2
-            // for TERM_PROGRAM=WezTerm), which blanks images if wrong; half
-            // blocks always show.
-            _ if !answered => Some(ProtocolType::Halfblocks),
             _ => None,
         };
-        if let Some(p) = protocol {
+        if let Some(p) = forced {
             picker.set_protocol_type(p);
         }
-        Some(Images { picker, answered, dims: HashMap::new(), ready: HashMap::new() })
+        Some(Images { picker, dims: HashMap::new(), ready: HashMap::new() })
     }
 
     /// What was detected, for `agentchat doctor`.
     pub fn describe(&self) -> String {
         let font = self.picker.font_size();
         format!(
-            "protocol: {:?}\nterminal answered the query: {}\ncell size: {}x{} px\ncapabilities: {:?}",
+            "protocol: {:?}\ncell size: {}x{} px\ncapabilities: {:?}",
             self.picker.protocol_type(),
-            if self.answered { "yes" } else { "no" },
             font.width,
             font.height,
             self.picker.capabilities(),
@@ -101,4 +101,11 @@ impl Images {
             f.render_stateful_widget(StatefulImage::default(), area, state);
         }
     }
+}
+
+/// WezTerm is the terminal agentchat talks to directly, not through a
+/// multiplexer (tmux, screen, herdr), which answers the query for itself.
+fn wezterm_outermost() -> bool {
+    let nested = ["TMUX", "STY", "HERDR_ENV"].iter().any(|k| std::env::var_os(k).is_some());
+    !nested && std::env::var("TERM_PROGRAM").is_ok_and(|t| t.eq_ignore_ascii_case("wezterm"))
 }

@@ -101,13 +101,4 @@ fn doctor() {
             println!("{k}={v}");
         }
     }
-    let wsl = std::fs::read_to_string("/proc/version").is_ok_and(|v| v.to_lowercase().contains("microsoft"));
-    let wezterm_mux = std::env::var("WEZTERM_PANE").is_ok();
-    if wsl && std::env::var("TERM_PROGRAM").is_ok_and(|t| t == "WezTerm") && !wezterm_mux {
-        println!(
-            "\nnote: WezTerm on Windows talks to WSL through ConPTY, which drops terminal replies and\n\
-             Kitty graphics. Connect through a WezTerm WSL or SSH domain (wezterm-mux-server in WSL)\n\
-             for Kitty images; otherwise half blocks are used."
-        );
-    }
 }
