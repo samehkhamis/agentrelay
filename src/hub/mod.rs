@@ -1,0 +1,232 @@
+//! The shared core both UIs render: agents, channels, the message log, read
+//! marks, followed transcripts and sending. Every process works off the same
+//! database, so the TUI and the web UI show the same state.
+
+pub mod channels;
+pub mod feed;
+mod watcher;
+
+use crate::agents::{Agent, Kind, Presence};
+use crate::db::{self, Msg};
+use crate::ipc;
+use crate::transcript::Tail;
+use anyhow::Result;
+use channels::{Channel, Section};
+use feed::Post;
+use rusqlite::Connection;
+use std::collections::HashMap;
+use std::sync::mpsc::Receiver;
+
+const HISTORY: i64 = 3000;
+const STATUS_ASK: &str = "Quick status update please: what are you working on, what's done, \
+                          and is anything blocked? 2-3 lines.";
+pub const HELP: &str = "commands: /status  /sound  /quit";
+
+/// What the user typed in a composer.
+pub enum Input {
+    Send(String),
+    ToggleSound,
+    Quit,
+    Help,
+}
+
+pub fn parse_input(text: &str) -> Option<Input> {
+    Some(match text.trim() {
+        "" => return None,
+        "/quit" | "/q" => Input::Quit,
+        "/sound" => Input::ToggleSound,
+        "/status" => Input::Send(STATUS_ASK.into()),
+        t if t.starts_with('/') => Input::Help,
+        t => Input::Send(t.into()),
+    })
+}
+
+/// A message logged and ready to deliver: run [`Delivery::run`] off the UI thread.
+pub struct Delivery {
+    pub targets: Vec<Agent>,
+    text: String,
+}
+
+impl Delivery {
+    /// (delivered, failed) agent names.
+    pub fn run(&self) -> (Vec<String>, Vec<String>) {
+        ipc::deliver(&self.targets, &self.text)
+    }
+}
+
+pub struct Hub {
+    conn: Connection,
+    pub me: String,
+    pub msgs: Vec<Msg>,
+    pub last_id: i64,
+    pub agents: Vec<Agent>,
+    pub channels: Vec<Channel>,
+    seen: HashMap<String, i64>,
+    /// Transcripts followed for DMs, by agent name.
+    tails: HashMap<String, Tail>,
+    agents_rx: Receiver<Vec<Agent>>,
+}
+
+impl Hub {
+    pub fn open() -> Result<Hub> {
+        let conn = db::open()?;
+        let msgs = db::tail(&conn, HISTORY)?;
+        let mut hub = Hub {
+            seen: db::seen(&conn)?,
+            last_id: msgs.last().map_or(0, |m| m.id),
+            conn,
+            me: std::env::var("AGENTCHAT_USER").or_else(|_| std::env::var("USER")).unwrap_or_else(|_| "you".into()),
+            msgs,
+            agents: Vec::new(),
+            channels: Vec::new(),
+            tails: HashMap::new(),
+            agents_rx: watcher::spawn(),
+        };
+        hub.channels = channels::build(&hub.agents, &hub.msgs);
+        Ok(hub)
+    }
+
+    /// Picks up new messages, agents and read marks. Returns the agents that
+    /// posted a new reply since the last poll.
+    pub fn poll(&mut self) -> Result<Vec<String>> {
+        // Agents first: the watcher logs a batch of statuses before publishing
+        // the list, so reading the log after it sees the whole batch.
+        let mut refreshed = None;
+        while let Ok(a) = self.agents_rx.try_recv() {
+            refreshed = Some(a);
+        }
+        let refreshed_any = refreshed.is_some();
+        let first_batch = refreshed_any && self.agents.is_empty();
+
+        let new = db::since(&self.conn, self.last_id)?;
+        if let Some(m) = new.last() {
+            self.last_id = m.id;
+        }
+        let replied = new.iter().filter(|m| m.kind == "status").map(|m| m.sender.clone()).collect();
+        let new_channel = new.iter().any(|m| !self.channels.iter().any(|c| c.id == m.channel));
+        self.msgs.extend(new);
+        if let Some(agents) = refreshed {
+            self.agents = agents;
+        }
+        if refreshed_any || new_channel {
+            self.channels = channels::build(&self.agents, &self.msgs);
+        }
+        self.seen = db::seen(&self.conn)?;
+        if first_batch {
+            // Channels never opened anywhere start out read.
+            for c in &self.channels {
+                if !self.seen.contains_key(&c.id) {
+                    db::mark_seen(&self.conn, &c.id, self.last_id)?;
+                }
+            }
+            self.seen = db::seen(&self.conn)?;
+        }
+        Ok(replied)
+    }
+
+    pub fn channel(&self, id: &str) -> Option<&Channel> {
+        self.channels.iter().find(|c| c.id == id)
+    }
+
+    pub fn members(&self, chan: &Channel) -> Vec<&Agent> {
+        channels::members(&self.agents, chan)
+    }
+
+    pub fn online(&self) -> usize {
+        self.agents.iter().filter(|a| a.presence != Presence::Away).count()
+    }
+
+    pub fn unread(&self, chan: &Channel) -> usize {
+        channels::unread(&self.msgs, &chan.id, self.seen.get(&chan.id).copied().unwrap_or(0), &self.me)
+    }
+
+    /// Marks a channel read up to now, for every UI.
+    pub fn mark_seen(&mut self, chan: &str) {
+        if self.seen.get(chan).copied().unwrap_or(0) < self.last_id && db::mark_seen(&self.conn, chan, self.last_id).is_ok() {
+            self.seen.insert(chan.to_string(), self.last_id);
+        }
+    }
+
+    /// The id of each agent's newest status, so a UI can tell when one replies.
+    pub fn last_statuses(&self) -> HashMap<&str, i64> {
+        let mut out = HashMap::new();
+        for m in self.msgs.iter().filter(|m| m.kind == "status") {
+            out.insert(m.sender.as_str(), m.id);
+        }
+        out
+    }
+
+    /// Starts or refreshes the transcript behind a DM.
+    pub fn follow(&mut self, chan: &str) {
+        let Some(name) = chan.strip_prefix("dm:") else { return };
+        let Some(agent) = self.agents.iter().find(|a| a.name == name) else { return };
+        let Some(path) = agent.transcript.clone() else { return };
+        let kind = agent.kind;
+        match self.tails.get_mut(name) {
+            Some(t) if t.path() == path => {
+                t.poll();
+            }
+            _ => {
+                self.tails.insert(name.to_string(), Tail::open(&path, kind));
+            }
+        }
+    }
+
+    /// The feed for a channel: the transcript for a followed DM, else the log.
+    pub fn posts(&self, chan: &Channel) -> Vec<Post<'_>> {
+        match chan.agent().and_then(|n| self.tails.get_key_value(n)) {
+            Some((name, tail)) => feed::transcript_posts(tail, name, chan.kind.unwrap_or(Kind::Claude), &self.me),
+            None => feed::log_posts(&self.msgs, chan),
+        }
+    }
+
+    /// Changes whenever the channel's feed does, so a UI can skip redrawing.
+    pub fn version(&self, chan: &Channel) -> String {
+        match chan.agent().and_then(|n| self.tails.get(n)) {
+            Some(t) => format!("t{}:{}", t.entries.len(), t.entries.last().map_or("", |e| e.key.as_str())),
+            None => format!("m{}", self.last_id),
+        }
+    }
+
+    /// The line under the channel title.
+    pub fn detail(&self, chan: &Channel) -> String {
+        let members = self.members(chan);
+        if chan.section == Section::Direct {
+            return match members.first() {
+                Some(a) => {
+                    let title = a.title.as_deref().map(|t| format!(" · {t}")).unwrap_or_default();
+                    format!("{} · {} · {}{title}", a.kind.as_str(), a.presence.label(), a.cwd)
+                }
+                None => "offline".into(),
+            };
+        }
+        let count = |p: Presence| members.iter().filter(|a| a.presence == p).count();
+        let kinds: Vec<String> = [Kind::Claude, Kind::Codex]
+            .iter()
+            .map(|k| (k, members.iter().filter(|a| a.kind == *k).count()))
+            .filter(|(_, n)| *n > 0)
+            .map(|(k, n)| format!("{n} {}", k.as_str()))
+            .collect();
+        format!(
+            "{} agents · {} · {} busy · {} online · {} away",
+            members.len(),
+            kinds.join(" · "),
+            count(Presence::Busy),
+            count(Presence::Online),
+            count(Presence::Away)
+        )
+    }
+
+    /// Logs a message in a channel and returns its delivery to everyone live
+    /// there (None if nobody is).
+    pub fn send(&mut self, chan_id: &str, body: &str) -> Result<Option<Delivery>> {
+        let Some(chan) = self.channel(chan_id).cloned() else { return Ok(None) };
+        db::post(&self.conn, &chan.id, &self.me, "user", "chat", body, db::now_ms())?;
+        let targets: Vec<Agent> =
+            self.members(&chan).into_iter().filter(|a| a.presence != Presence::Away).cloned().collect();
+        let channel = (chan.section != Section::Direct).then(|| chan.name().to_string());
+        let text = ipc::compose(&self.me, channel.as_deref(), body);
+        self.poll()?;
+        Ok((!targets.is_empty()).then_some(Delivery { targets, text }))
+    }
+}
