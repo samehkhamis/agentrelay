@@ -5,25 +5,22 @@ use crate::{highlight, theme};
 use pulldown_cmark::{Event, HeadingLevel, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use std::ops::Range;
 use unicode_width::UnicodeWidthStr;
 
 /// Renders markdown; inline code that `is_file` accepts is drawn as a file link.
 pub fn render(text: &str, width: usize, is_file: &dyn Fn(&str) -> bool) -> Vec<Line<'static>> {
     let mut r = Renderer { width: width.max(16), ..Renderer::default() };
-    for ev in highlight::markdown(text) {
-        match ev {
-            Event::Code(t) if is_file(&t) => {
-                let link = Style::new().fg(theme::t().link).add_modifier(Modifier::UNDERLINED);
-                r.push(&t, link);
-            }
-            ev => r.event(ev),
-        }
-    }
-    r.flush();
-    while r.out.last().is_some_and(|l| l.width() == 0) {
-        r.out.pop();
-    }
+    r.run(text, is_file);
     r.out
+}
+
+/// Like [`render`], also returning each image's lines (holding its alt text)
+/// and its URL, for a caller that can draw images there.
+pub fn render_doc(text: &str, width: usize, is_file: &dyn Fn(&str) -> bool) -> (Vec<Line<'static>>, Vec<(Range<usize>, String)>) {
+    let mut r = Renderer { width: width.max(16), doc: true, ..Renderer::default() };
+    r.run(text, is_file);
+    (r.out, r.images)
 }
 
 #[derive(Default)]
@@ -48,9 +45,30 @@ struct Renderer {
     marker: Option<String>,
     code: Option<(String, String)>,
     table: Option<Table>,
+    /// Images: the lines with their alt text, and their URL.
+    images: Vec<(Range<usize>, String)>,
+    /// A document (a previewed file) rather than a message: its `<img>`
+    /// tags count as images, and other HTML is dropped.
+    doc: bool,
 }
 
 impl Renderer {
+    fn run(&mut self, text: &str, is_file: &dyn Fn(&str) -> bool) {
+        for ev in highlight::markdown(text) {
+            match ev {
+                Event::Code(t) if is_file(&t) => {
+                    let link = Style::new().fg(theme::t().link).add_modifier(Modifier::UNDERLINED);
+                    self.push(&t, link);
+                }
+                ev => self.event(ev),
+            }
+        }
+        self.flush();
+        while self.out.last().is_some_and(|l| l.width() == 0) {
+            self.out.pop();
+        }
+    }
+
     fn style(&self) -> Style {
         let mut s = self.styles.iter().fold(Style::new(), |a, b| a.patch(*b));
         match self.heading {
@@ -87,6 +105,26 @@ impl Renderer {
         }
     }
 
+    /// Starts an image's line, marked, noting where it is (outside tables)
+    /// for a caller that can draw the image there.
+    fn image(&mut self, url: &str) {
+        if self.table.is_none() {
+            self.flush();
+            self.images.push((self.out.len()..self.out.len(), url.to_string()));
+        }
+        self.push("🖼 ", Style::new().fg(theme::t().link));
+    }
+
+    /// Ends an image's alt text, noting the lines it took.
+    fn end_image(&mut self) {
+        if self.table.is_none() {
+            self.flush();
+            if let Some((lines, _)) = self.images.last_mut() {
+                lines.end = self.out.len();
+            }
+        }
+    }
+
     fn flush(&mut self) {
         if self.spans.is_empty() {
             return;
@@ -115,6 +153,13 @@ impl Renderer {
             Event::Text(t) => self.push(&t, self.style()),
             Event::Code(t) | Event::InlineMath(t) => self.push(&t, Style::new().fg(theme::t().code)),
             Event::DisplayMath(t) => self.push(&t, Style::new().fg(theme::t().code)),
+            Event::Html(t) | Event::InlineHtml(t) if self.doc => {
+                for img in highlight::img_tags(&t) {
+                    self.image(&img.src);
+                    self.push(&img.alt, Style::new().fg(theme::t().link).add_modifier(Modifier::ITALIC));
+                    self.end_image();
+                }
+            }
             Event::Html(t) | Event::InlineHtml(t) => self.push(&t, Style::new().fg(theme::t().dim)),
             Event::SoftBreak => self.push(" ", Style::new()),
             Event::HardBreak => self.push("\n", Style::new()),
@@ -172,9 +217,10 @@ impl Renderer {
             Tag::Strong => self.styles.push(Style::new().add_modifier(Modifier::BOLD)),
             Tag::Strikethrough => self.styles.push(Style::new().add_modifier(Modifier::CROSSED_OUT)),
             Tag::Link { .. } => self.styles.push(Style::new().fg(theme::t().link).add_modifier(Modifier::UNDERLINED)),
-            // An image shows as its alt text, marked.
-            Tag::Image { .. } => {
-                self.push("🖼 ", Style::new().fg(theme::t().link));
+            // An image shows as its alt text, marked, on a line of its own
+            // (outside tables) where a caller can draw the image instead.
+            Tag::Image { dest_url, .. } => {
+                self.image(&dest_url);
                 self.styles.push(Style::new().fg(theme::t().link).add_modifier(Modifier::ITALIC));
             }
             Tag::Table(_) => {
@@ -217,8 +263,12 @@ impl Renderer {
                 self.flush();
                 self.lists.pop();
             }
-            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link | TagEnd::Image => {
+            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Link => {
                 self.styles.pop();
+            }
+            TagEnd::Image => {
+                self.styles.pop();
+                self.end_image();
             }
             TagEnd::TableHead => {
                 if let Some(t) = &mut self.table {

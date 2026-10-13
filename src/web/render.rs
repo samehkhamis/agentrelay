@@ -44,6 +44,19 @@ fn render(text: &str, file_link: &dyn Fn(&str) -> Option<String>, dir: Option<&P
                 let (lang, buf) = code.take().unwrap_or_default();
                 events.push(Event::Html(code_block(&lang, &buf).into()));
             }
+            // In a preview, `<img>` tags (as READMEs use to size images) show;
+            // other markup around them is dropped.
+            (None, Event::Html(t) | Event::InlineHtml(t)) if dir.is_some() => {
+                for img in highlight::img_tags(&t) {
+                    match dir.and_then(|d| inline_image(d, &img.src)) {
+                        Some(src) => {
+                            let width = img.width.map(|w| format!(" width=\"{w}\"")).unwrap_or_default();
+                            events.push(Event::Html(format!("<img src=\"{src}\" alt=\"{}\"{width}>", escape(&img.alt)).into()));
+                        }
+                        None => events.push(Event::Text(img.alt.into())),
+                    }
+                }
+            }
             (_, Event::Html(t) | Event::InlineHtml(t)) => events.push(Event::Text(t)),
             (_, Event::Code(t)) => match file_link(&t) {
                 Some(f) => events.push(Event::Html(
@@ -190,6 +203,10 @@ mod tests {
         // A remote image keeps only its alt text.
         assert!(!out.contains("x.dev/a.png") && out.contains("> r <a"), "{out}");
         assert!(out.contains("href=\"https://x.dev\""));
+        // Sized `<img>` tags too, without the markup around them.
+        let out = preview("<p align=\"center\">\n  <img src=\"docs/shot.png\" alt=\"s\" width=\"220\">\n</p>", &readme);
+        assert!(out.contains("<img src=\"data:image/png;base64,") && out.contains("width=\"220\""), "{out}");
+        assert!(!out.contains("&lt;p"), "{out}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

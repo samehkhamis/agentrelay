@@ -1,6 +1,7 @@
 //! The file pane: a file a feed mentions, highlighted, with line numbers,
 //! opened at the mentioned line. Markdown files can also show rendered.
 
+use super::images::Images;
 use super::markdown;
 use crate::files::{self, FileRef};
 use crate::{db, highlight, theme};
@@ -18,7 +19,7 @@ pub struct Viewer {
     text: String,
     source: Vec<Line<'static>>,
     /// Some for markdown: the preview rendered at a width, once shown.
-    preview: Option<Option<(u16, Vec<Line<'static>>)>>,
+    preview: Option<Option<Preview>>,
     previewing: bool,
     /// Where the Preview/Source toggle was drawn, for clicks.
     toggle: Rect,
@@ -79,7 +80,7 @@ impl Viewer {
     }
 
     /// Draws the pane; `focused` gives its border the accent color.
-    pub fn draw(&mut self, f: &mut Frame, area: Rect, focused: bool) {
+    pub fn draw(&mut self, f: &mut Frame, area: Rect, focused: bool, mut images: Option<&mut Images>) {
         let th = theme::t();
         let dim = Style::new().fg(th.dim);
         let mut title = vec![Span::styled(format!(" {} ", self.title), Style::new().fg(th.fg).bold())];
@@ -100,23 +101,86 @@ impl Viewer {
             .border_style(Style::new().fg(if focused { th.link } else { th.dim }))
             .title(Line::from(title));
         let inner = block.inner(area);
-        let lines = match &mut self.preview {
+        let (lines, slots) = match &mut self.preview {
             Some(cached) if self.previewing => {
                 let width = inner.width.saturating_sub(2);
-                if cached.as_ref().is_none_or(|(w, _)| *w != width) {
-                    let dir = &self.dir;
-                    let is_file = |c: &str| files::resolve(dir, c).is_some();
-                    let lines = markdown::render(&self.text, width as usize, &is_file);
-                    *cached = Some((width, lines.into_iter().map(|l| pad(l)).collect()));
+                if cached.as_ref().is_none_or(|p| p.width != width) {
+                    *cached = Some(Preview::new(&self.text, &self.dir, width, images.as_deref_mut()));
                 }
-                &cached.as_ref().expect("rendered above").1
+                let p = cached.as_ref().expect("rendered above");
+                (&p.lines, p.slots.as_slice())
             }
-            _ => &self.source,
+            _ => (&self.source, &[][..]),
         };
-        self.scroll = self.scroll.min(lines.len().saturating_sub(inner.height as usize));
-        let shown: Vec<Line> = lines.iter().skip(self.scroll).take(inner.height as usize).cloned().collect();
+        let height = inner.height as usize;
+        self.scroll = self.scroll.min(lines.len().saturating_sub(height));
+        let shown: Vec<Line> = lines.iter().skip(self.scroll).take(height).cloned().collect();
         f.render_widget(Paragraph::new(shown).block(block), area);
+        // Images go into their reserved rows when those are fully on screen.
+        if let Some(images) = images {
+            let end = self.scroll + height;
+            for s in slots.iter().filter(|s| s.line >= self.scroll && s.line + s.rows as usize <= end) {
+                let x = inner.x + 1;
+                let rect = Rect::new(x, inner.y + (s.line - self.scroll) as u16, s.cols.min(inner.right() - x), s.rows);
+                images.draw(f, rect, &s.path);
+            }
+        }
     }
+}
+
+/// A markdown file rendered for the pane, with rows reserved for its local
+/// images.
+struct Preview {
+    width: u16,
+    lines: Vec<Line<'static>>,
+    slots: Vec<Slot>,
+}
+
+/// An image's place in the preview.
+struct Slot {
+    line: usize,
+    cols: u16,
+    rows: u16,
+    path: String,
+}
+
+impl Preview {
+    fn new(text: &str, dir: &str, width: u16, mut images: Option<&mut Images>) -> Preview {
+        let is_file = |c: &str| files::resolve(dir, c).is_some();
+        let (rendered, found) = markdown::render_doc(text, width as usize, &is_file);
+        let mut lines = Vec::with_capacity(rendered.len());
+        let mut slots = Vec::new();
+        let mut found = found.into_iter().peekable();
+        let mut skip = 0..0;
+        for (i, line) in rendered.into_iter().enumerate() {
+            // An image's alt text, when the image can be drawn, becomes blank
+            // rows for it.
+            let image = found.next_if(|(at, _)| at.start == i).and_then(|(at, url)| {
+                let path = local_image(dir, &url)?;
+                let (cols, rows) = images.as_deref_mut()?.size(&path, width)?;
+                skip = at;
+                Some(Slot { line: lines.len(), cols, rows, path })
+            });
+            match image {
+                Some(slot) => {
+                    lines.extend((0..slot.rows).map(|_| Line::default()));
+                    slots.push(slot);
+                }
+                None if skip.contains(&i) => {}
+                None => lines.push(pad(line)),
+            }
+        }
+        Preview { width, lines, slots }
+    }
+}
+
+/// A relative image URL as a file beside the markdown file.
+fn local_image(dir: &str, url: &str) -> Option<String> {
+    if url.contains("://") || url.starts_with("data:") {
+        return None;
+    }
+    let path = std::path::Path::new(dir).join(url.split(['#', '?']).next()?);
+    path.is_file().then(|| path.display().to_string())
 }
 
 /// A left margin for preview lines.

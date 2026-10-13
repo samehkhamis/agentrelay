@@ -45,7 +45,7 @@ impl App {
         self.draw_feed(f, body);
         self.viewer_area = Rect::default();
         if let (Some(v), Some(pane)) = (self.viewer.as_mut(), pane) {
-            v.draw(f, pane, self.focus == super::Focus::File);
+            v.draw(f, pane, self.focus == super::Focus::File, self.images.as_mut());
             self.viewer_area = pane;
         }
         self.draw_composer(f, composer);

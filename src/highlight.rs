@@ -67,3 +67,61 @@ pub fn lines(lang: &str, code: &str) -> Vec<Vec<(Rgb, String)>> {
         })
         .collect()
 }
+
+/// An `<img>` tag in a markdown file's HTML, as READMEs use to size images.
+pub struct ImgTag {
+    pub src: String,
+    pub alt: String,
+    pub width: Option<u32>,
+}
+
+/// The `<img>` tags in an HTML fragment, in order.
+pub fn img_tags(html: &str) -> Vec<ImgTag> {
+    let lower = html.to_ascii_lowercase();
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(start) = lower[at..].find("<img").map(|i| at + i) {
+        let end = lower[start..].find('>').map_or(html.len(), |i| start + i);
+        let tag = &html[start..end];
+        if let Some(src) = attr(tag, "src") {
+            out.push(ImgTag {
+                src,
+                alt: attr(tag, "alt").unwrap_or_default(),
+                width: attr(tag, "width").and_then(|w| w.trim_end_matches("px").parse().ok()),
+            });
+        }
+        at = end;
+    }
+    out
+}
+
+/// A quoted attribute's value in a tag.
+fn attr(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(i) = lower[from..].find(name).map(|i| from + i) {
+        from = i + name.len();
+        // A whole attribute name, followed by =.
+        let before = lower[..i].chars().next_back();
+        if !before.is_some_and(char::is_whitespace) {
+            continue;
+        }
+        let rest = tag[from..].trim_start().strip_prefix('=')?.trim_start();
+        let quote = rest.chars().next().filter(|q| *q == '"' || *q == '\'')?;
+        let value = &rest[1..];
+        return value.find(quote).map(|j| value[..j].to_string());
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::img_tags;
+
+    #[test]
+    fn finds_img_tags() {
+        let tags = img_tags("<p align=\"center\">\n  <img src=\"a.png\" alt=\"An A\" width=\"220\">\n  <IMG data-src='x' src='b.png'></p>");
+        let got: Vec<_> = tags.iter().map(|t| (t.src.as_str(), t.alt.as_str(), t.width)).collect();
+        assert_eq!(got, [("a.png", "An A", Some(220)), ("b.png", "", None)]);
+    }
+}
