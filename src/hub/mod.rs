@@ -307,7 +307,9 @@ impl Hub {
     /// Opens a file mentioned in a channel for viewing: inside one of its
     /// agents' folders, or one the feed mentions. Returns it with its line.
     pub fn open_file(&self, chan: &Channel, raw: &str) -> Result<(FileRef, String)> {
-        let cwds: Vec<&str> = self.posts(chan).iter().filter_map(|p| p.cwd).collect();
+        // The posts' folders, plus the agents' own, for a feed not loaded yet.
+        let mut cwds: Vec<&str> = self.posts(chan).iter().filter_map(|p| p.cwd).collect();
+        cwds.extend(self.members(chan).iter().map(|a| a.cwd.as_str()));
         let file = cwds
             .iter()
             .find_map(|cwd| files::resolve(cwd, raw))
